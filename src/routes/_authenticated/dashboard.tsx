@@ -60,13 +60,20 @@ function Dashboard() {
         .range((page - 1) * pageSize, page * pageSize - 1);
 
       if (onlyNoSite) query = query.eq("has_website", false);
-      if (onlyPhone) query = query.or("phone.not.is.null,whatsapp.not.is.null");
       if (filterCity) query = query.eq("city", filterCity);
       if (filterStatus) query = query.eq("status", filterStatus);
 
       // Strip PostgREST filter syntax before embedding user-provided search text.
       const safeQuery = q.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80);
-      if (safeQuery) query = query.or(`name.ilike.%${safeQuery}%,category.ilike.%${safeQuery}%`);
+      if (onlyPhone && safeQuery) {
+        query = query.or(
+          `and(phone.not.is.null,name.ilike.%${safeQuery}%),and(phone.not.is.null,category.ilike.%${safeQuery}%),and(whatsapp.not.is.null,name.ilike.%${safeQuery}%),and(whatsapp.not.is.null,category.ilike.%${safeQuery}%)`,
+        );
+      } else if (onlyPhone) {
+        query = query.or("phone.not.is.null,whatsapp.not.is.null");
+      } else if (safeQuery) {
+        query = query.or(`name.ilike.%${safeQuery}%,category.ilike.%${safeQuery}%`);
+      }
 
       const { data, count, error } = await query;
       if (error) throw error;
