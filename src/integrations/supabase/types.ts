@@ -14,7 +14,84 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      leads: {
+        Row: {
+          address: string | null
+          ai_message: string | null
+          ai_score: number | null
+          ai_summary: string | null
+          approved: boolean
+          category: string | null
+          city: string | null
+          created_at: string
+          fetched_at: string
+          has_menu: boolean
+          has_website: boolean
+          id: string
+          lat: number | null
+          lon: number | null
+          name: string
+          notes: string | null
+          phone: string | null
+          source: string
+          source_id: string | null
+          status: string
+          user_id: string
+          website: string | null
+          whatsapp: string | null
+        }
+        Insert: {
+          address?: string | null
+          ai_message?: string | null
+          ai_score?: number | null
+          ai_summary?: string | null
+          approved?: boolean
+          category?: string | null
+          city?: string | null
+          created_at?: string
+          fetched_at?: string
+          has_menu?: boolean
+          has_website?: boolean
+          id?: string
+          lat?: number | null
+          lon?: number | null
+          name: string
+          notes?: string | null
+          phone?: string | null
+          source?: string
+          source_id?: string | null
+          status?: string
+          user_id: string
+          website?: string | null
+          whatsapp?: string | null
+        }
+        Update: {
+          address?: string | null
+          ai_message?: string | null
+          ai_score?: number | null
+          ai_summary?: string | null
+          approved?: boolean
+          category?: string | null
+          city?: string | null
+          created_at?: string
+          fetched_at?: string
+          has_menu?: boolean
+          has_website?: boolean
+          id?: string
+          lat?: number | null
+          lon?: number | null
+          name?: string
+          notes?: string | null
+          phone?: string | null
+          source?: string
+          source_id?: string | null
+          status?: string
+          user_id?: string
+          website?: string | null
+          whatsapp?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
