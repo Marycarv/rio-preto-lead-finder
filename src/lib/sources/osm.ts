@@ -32,6 +32,8 @@ type NominatimResult = {
   osm_id?: unknown;
   name?: unknown;
   display_name?: unknown;
+  // Nominatim's jsonv2 format calls the former "class" field "category".
+  category?: unknown;
   class?: unknown;
   type?: unknown;
   address?: Record<string, unknown>;
@@ -233,7 +235,8 @@ async function resolveCityArea(city: City): Promise<CityArea> {
   for (const entry of rawResults) {
     if (!isRecord(entry)) continue;
     const candidate = entry as NominatimResult;
-    if (candidate.osm_type !== "relation" || candidate.class !== "boundary" || candidate.type !== "administrative") {
+    const resultCategory = candidate.category ?? candidate.class;
+    if (candidate.osm_type !== "relation" || resultCategory !== "boundary" || candidate.type !== "administrative") {
       continue;
     }
     if (typeof candidate.osm_id !== "number" && typeof candidate.osm_id !== "string") continue;
