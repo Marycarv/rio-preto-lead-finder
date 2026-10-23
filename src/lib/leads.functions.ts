@@ -132,6 +132,7 @@ export const analyzeLead = createServerFn({ method: "POST" })
         ai_score: result.score,
         ai_summary: result.summary,
         ai_message: result.message,
+        approved: false,
         status: "analisado",
       })
       .eq("id", lead.id)
