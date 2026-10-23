@@ -122,7 +122,7 @@ function Dashboard() {
     setBusyId(l.id);
     try {
       const r = await runAnalyze({ data: { id: l.id } });
-      const updated = { ...l, ai_score: r.score, ai_summary: r.summary, ai_message: r.message, status: "analisado" };
+      const updated = { ...l, ai_score: r.score, ai_summary: r.summary, ai_message: r.message, approved: false, status: "analisado" };
       setSel(updated); setDraft(r.message);
       await qc.invalidateQueries({ queryKey: ["leads"] });
       await qc.invalidateQueries({ queryKey: ["lead-stats"] });
@@ -277,14 +277,17 @@ function Dashboard() {
                 <>
                   <Textarea rows={8} value={draft} onChange={(e) => setDraft(e.target.value)} />
                   <Button className="w-full" onClick={() => approve(sel)}>{sel.approved ? "Salvar edição" : "Aprovar mensagem"}</Button>
-                  {sel.approved && (() => {
+                  {sel.approved && sel.ai_message !== draft.trim() && (
+                    <p className="text-xs text-muted-foreground">A mensagem foi editada. Salve a edição para aprovar a versão atual antes do contato.</p>
+                  )}
+                  {sel.approved && sel.ai_message === draft.trim() && (() => {
                     const link = createWhatsAppUrl(sel.whatsapp, draft) ?? createWhatsAppUrl(sel.phone, draft);
                     return (
                       <>
                         {link
                           ? <Button asChild variant="outline" className="w-full"><a href={link} target="_blank" rel="noreferrer">Abrir no WhatsApp</a></Button>
                           : <p className="text-xs text-muted-foreground">Telefone ausente ou inválido — confirme o número na fonte antes de enviar.</p>}
-                        {sel.approved && sel.status !== "contatado" && (
+                        {sel.status !== "contatado" && (
                           <Button variant="secondary" className="w-full" onClick={() => markSent(sel)}>Registrar contato realizado</Button>
                         )}
                         {sel.status === "contatado" && <p className="text-xs text-muted-foreground">Contato registrado manualmente.</p>}
