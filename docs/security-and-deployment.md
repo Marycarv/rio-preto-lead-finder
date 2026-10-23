@@ -9,7 +9,7 @@
 
 ## Uma única inteligência: Gemini com pesquisa Google
 
-O fluxo de pesquisa e geração de mensagens usa diretamente o Gemini API. Pesquisa e redação usam `gemini-2.5-flash`; para buscar negócios, o agente ativa somente o Google Search grounding. Isso evita exigir acesso ao Maps grounding, cujo uso e disponibilidade de quota diferem por nível de conta. Não há chamadas ao Outscraper, Nominatim ou Overpass no fluxo do produto.
+O fluxo de pesquisa e geração de mensagens usa diretamente o Gemini API. Pesquisa e redação usam `gemini-3.8-flash`; para buscar negócios, o agente ativa somente o Google Search grounding. Isso evita exigir acesso ao Maps grounding, cujo uso e disponibilidade de quota diferem por nível de conta. Não há chamadas ao Outscraper, Nominatim ou Overpass no fluxo do produto.
 
 ### Segredo obrigatório
 
@@ -25,7 +25,7 @@ Adicione `GEMINI_API_KEY` aos Secrets de servidor do Lovable Cloud. Crie e admin
 
 ### Custos e limites
 
-A tabela de preços oficial consultada em outubro de 2026 indica que `gemini-2.5-flash` inclui Google Search grounding gratuito até 500 consultas por dia, compartilhadas com Flash-Lite. Esse limite é por projeto e a conta ainda pode estar sujeita a limites próprios. Google Maps grounding tem quota e cobrança separadas; por isso ele não é chamado na pesquisa atual.
+Para Gemini 3 e modelos posteriores, a documentação oficial informa 5.000 consultas gratuitas de Google Search grounding por mês, compartilhadas entre esses modelos; após isso, o preço publicado é US$ 14 por 1.000 consultas de pesquisa. Cada chamada pode executar várias pesquisas, então o consumo pode ser maior que o número de chamadas ao aplicativo. As cotas e a disponibilidade efetiva dependem do projeto e da conta. Google Maps grounding tem quota e cobrança separadas; por isso ele não é chamado na pesquisa atual.
 
 - Limites de taxa: https://ai.google.dev/gemini-api/docs/rate-limits
 - Google Search grounding: https://ai.google.dev/gemini-api/docs/google-search
