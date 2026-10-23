@@ -81,7 +81,7 @@ describe("OpenStreetMap service failures", () => {
       osm_type: "relation",
       osm_id: 123456,
       name: "Cedral",
-      class: "boundary",
+      category: "boundary",
       type: "administrative",
       address: { city: "Cedral", state: "São Paulo", country: "Brasil" },
       extratags: { admin_level: "8" },
