@@ -5,6 +5,11 @@ export const importInputSchema = z.object({
   city: z.enum(CITIES),
 }).strict();
 
+export const geminiSearchInputSchema = z.object({
+  city: z.enum(CITIES),
+  query: z.string().trim().min(3).max(120).default("local businesses that may lack an official website or digital menu"),
+}).strict();
+
 export const analyzeInputSchema = z.object({
   id: z.string().uuid(),
 }).strict();
