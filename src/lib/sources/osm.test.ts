@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { normalizeOsmElements, splitOsmBounds } from "@/lib/sources/osm";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { fetchOsmLeads, normalizeOsmElements, splitOsmBounds } from "@/lib/sources/osm";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 describe("OpenStreetMap lead normalization", () => {
   it("uses stable source IDs and removes duplicate elements", () => {
@@ -59,5 +63,52 @@ describe("verified municipal query subdivision", () => {
       { south: -20.5, west: -50, north: -20, east: -49.5 },
       { south: -20.5, west: -49.5, north: -20, east: -49 },
     ]);
+  });
+});
+
+
+describe("OpenStreetMap service failures", () => {
+  it("stops safely when Nominatim returns HTTP 429", async () => {
+    const fetchMock = vi.fn(async () => new Response("rate limited", { status: 429 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchOsmLeads("Cedral")).rejects.toThrow("limitando consultas");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses a bounded Overpass fallback and surfaces rate limits without partial results", async () => {
+    const cityBoundary = [{
+      osm_type: "relation",
+      osm_id: 123456,
+      name: "Cedral",
+      class: "boundary",
+      type: "administrative",
+      address: { city: "Cedral", state: "São Paulo", country: "Brasil" },
+      extratags: { admin_level: "8" },
+      boundingbox: ["-20.95", "-20.75", "-49.35", "-49.10"],
+    }];
+
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).startsWith("https://nominatim.openstreetmap.org/")) {
+        return new Response(JSON.stringify(cityBoundary), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response("rate limited", { status: 429 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchOsmLeads("Cedral")).rejects.toThrow("limitando consultas");
+    // One validated boundary lookup plus at most two Overpass attempts.
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("rejects unlisted cities without making public-service requests", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchOsmLeads("Cidade não configurada")).rejects.toThrow("Cidade inválida");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
