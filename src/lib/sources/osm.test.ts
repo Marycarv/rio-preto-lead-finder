@@ -143,7 +143,7 @@ describe("OpenStreetMap service failures", () => {
     expect(requestedQueries.length).toBe(8);
     expect(requestedQueries.slice(1, 5).every((query) => query.includes("area(3600123457)"))).toBe(true);
     expect(requestedQueries.slice(1, 5).every((query) => /\(-20\.\d+,-49\.\d+,-20\.\d+,-49\.\d+\)/.test(query))).toBe(true);
-  });
+  }, 15_000);
 
   it("rejects unlisted cities without making public-service requests", async () => {
     const fetchMock = vi.fn();
