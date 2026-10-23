@@ -1,4 +1,6 @@
 import { createServerFn } from "@tanstack/react-start";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { CITIES } from "./sources/cities";
 import {
@@ -27,9 +29,8 @@ type ImportSummary = {
 
 async function saveImportedLeads(
   raw: ProspectLead[],
-  city: (typeof CITIES)[number],
   userId: string,
-  supabase: Parameters<Parameters<typeof requireSupabaseAuth>[0]>[0] extends never ? never : any,
+  supabase: SupabaseClient<Database>,
 ): Promise<ImportSummary> {
   const now = new Date().toISOString();
   const rows = raw.map((lead) => ({ ...lead, user_id: userId, fetched_at: now }));
@@ -78,7 +79,7 @@ export const importLeads = createServerFn({ method: "POST" })
     const started = await startOutscraperSearch(apiKey, data.city);
     if (started.status === "complete") {
       const raw = normalizeOutscraperResults(started.data, data.city);
-      return saveImportedLeads(raw, data.city, context.userId, context.supabase);
+      return saveImportedLeads(raw, context.userId, context.supabase);
     }
 
     return {
@@ -105,7 +106,7 @@ export const getLeadImportStatus = createServerFn({ method: "POST" })
     if (task.status === "processing") return { status: "processing" as const };
 
     const raw = normalizeOutscraperResults(task.data, claim.city);
-    return saveImportedLeads(raw, claim.city, context.userId, context.supabase);
+    return saveImportedLeads(raw, context.userId, context.supabase);
   });
 
 const AI_RESPONSE_SCHEMA = {
