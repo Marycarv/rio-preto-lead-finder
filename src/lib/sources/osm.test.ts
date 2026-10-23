@@ -104,6 +104,47 @@ describe("OpenStreetMap service failures", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("subdivides a verified city boundary after an Overpass query timeout", async () => {
+    const cityBoundary = [{
+      osm_type: "relation",
+      osm_id: 123457,
+      name: "Ipiguá",
+      category: "boundary",
+      type: "administrative",
+      address: { city: "Ipiguá", state: "São Paulo", country: "Brasil" },
+      extratags: { admin_level: "8" },
+      boundingbox: ["-20.95", "-20.75", "-49.35", "-49.10"],
+    }];
+
+    const requestedQueries: string[] = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith("https://nominatim.openstreetmap.org/")) {
+        return new Response(JSON.stringify(cityBoundary), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+
+      const body = String(init?.body ?? "");
+      requestedQueries.push(decodeURIComponent(body));
+      if (requestedQueries.length === 1) {
+        return new Response("gateway timeout", { status: 504 });
+      }
+      return new Response(JSON.stringify({ elements: [] }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchOsmLeads("Ipiguá")).resolves.toEqual([]);
+    // The first whole-city query timed out; the remaining queries should use
+    // smaller bounds derived from the validated municipal response.
+    expect(requestedQueries.length).toBe(8);
+    expect(requestedQueries.slice(1, 5).every((query) => query.includes("area(3600123457)"))).toBe(true);
+    expect(requestedQueries.slice(1, 5).every((query) => /\(-20\.\d+,-49\.\d+,-20\.\d+,-49\.\d+\)/.test(query))).toBe(true);
+  }, 15_000);
+
   it("rejects unlisted cities without making public-service requests", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
