@@ -104,20 +104,28 @@ function readInteractionText(payload: JsonRecord): { text: string; sources: Grou
   return { text, sources: [...sources.values()] };
 }
 function extractJson(text: string): unknown {
-  try { return JSON.parse(text.trim()) as unknown; }
-  catch { throw new Error("O Gemini retornou uma resposta que não é JSON válido. Tente novamente."); }
+  const trimmed = text.trim();
+  try { return JSON.parse(trimmed) as unknown; } catch { /* Try an unwrapped JSON object below. */ }
+  const firstBrace = trimmed.indexOf("{");
+  const lastBrace = trimmed.lastIndexOf("}");
+  if (firstBrace >= 0 && lastBrace > firstBrace) {
+    try { return JSON.parse(trimmed.slice(firstBrace, lastBrace + 1)) as unknown; } catch { /* Report a safe error below. */ }
+  }
+  throw new Error("O Gemini retornou uma resposta que não é JSON válido. Tente novamente.");
 }
 
 async function runGeminiInteraction(
   apiKey: string, input: string, schema: object, useGoogleTools: boolean,
 ): Promise<{ value: unknown; sources: GroundingSource[] }> {
-  const body: JsonRecord = {
-    model: GEMINI_MODEL,
-    input,
-    store: false,
-    response_format: { type: "text", mime_type: "application/json", schema },
-  };
-  if (useGoogleTools) body["tools"] = [{ type: "google_search" }, { type: "google_maps" }];
+  const body: JsonRecord = { model: GEMINI_MODEL, input, store: false };
+  if (useGoogleTools) {
+    // Use JSON-only prompting for the grounded response; keep structured output
+    // enforcement for the normal text-only message-writing call. This avoids
+    // relying on an unconfirmed combination of Maps grounding + response schema.
+    body["tools"] = [{ type: "google_search" }, { type: "google_maps" }];
+  } else {
+    body["response_format"] = { type: "text", mime_type: "application/json", schema };
+  }
 
   let response: Response;
   try {
@@ -154,7 +162,8 @@ export async function searchGeminiProspects(apiKey: string, requestedCity: City,
     "Use English for search instructions and output because Google Maps grounding currently supports English. Preserve exact business names, addresses, and phone numbers as listed.",
     "Do not invent businesses, addresses, phone numbers, websites, menu links, coordinates, Place IDs, or source URLs. Use null for unknown fields.",
     "For google_maps_url, use the exact place-citation URL from Google Maps grounding. For source_url, use an exact URL citation from Google Search. Exclude a business if you cannot provide a verifiable source URL.",
-    "The requested city must be the actual city. Do not mislabel neighboring towns as " + requestedCity + ". Return only JSON matching the schema.",
+    "The requested city must be the actual city. Do not mislabel neighboring towns as " + requestedCity + ". Return only a JSON object with a top-level businesses array and no markdown.",
+    "Match this exact JSON schema: " + JSON.stringify(PROSPECT_SCHEMA),
   ].join("\n");
 
   const interaction = await runGeminiInteraction(apiKey, prompt, PROSPECT_SCHEMA, true);
