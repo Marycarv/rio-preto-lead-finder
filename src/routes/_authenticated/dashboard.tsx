@@ -71,7 +71,7 @@ function Dashboard() {
   const runAnalyze = useServerFn(analyzeLead);
   const [city, setCity] = useState<string>(CITIES[0]);
   const [importing, setImporting] = useState(false);
-  const [searchFocus, setSearchFocus] = useState("restaurants, cafes, bakeries and local service businesses");
+  const [searchFocus, setSearchFocus] = useState("restaurantes, cafeterias, padarias e negócios locais sem site ou cardápio digital");
   const [importStage, setImportStage] = useState("");
   const [onlyNoSite, setOnlyNoSite] = useState(false);
   const [onlyPhone, setOnlyPhone] = useState(false);
