@@ -8,3 +8,7 @@
 > Commits you push to the connected branch sync back to Lovable and show up in
 > the editor, so keep the branch in a working state.
 <!-- LOVABLE:END -->
+
+Lead sources live in src/lib/sources/* and return RawLead[]; add new sources there so import stays modular.
+Leads are user-scoped (RLS on user_id); server functions use requireSupabaseAuth.
+AI never sends messages: it only drafts; user approves and opens WhatsApp manually (product requirement).
