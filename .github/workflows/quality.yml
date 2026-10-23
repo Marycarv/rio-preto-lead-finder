@@ -32,6 +32,12 @@ jobs:
           cache: npm
           cache-dependency-path: package.json
 
+      # npm 10.9.x can crash in Arborist's peer resolver on currently published
+      # optional peer combinations ("Cannot read properties of null (reading 'edgesOut')");
+      # npm 11.19.1 includes the fix and is compatible with this Node 22 runner.
+      - name: Use npm with peer-resolution fix
+        run: npm install --global npm@11.19.1
+
       - name: Install dependencies
         run: npm install --no-audit --no-fund
 
