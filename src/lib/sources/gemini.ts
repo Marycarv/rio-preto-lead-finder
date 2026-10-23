@@ -171,9 +171,15 @@ export async function searchGeminiProspects(apiKey: string, requestedCity: City,
     const name = cleanText(candidate.name, 180);
     if (!name) continue;
     const candidateMapsUrl = validHttpUrl(candidate.google_maps_url);
+    const normalizedLeadName = normalizeName(name);
     const citedMapsUrl = candidateMapsUrl && mapsSources.some((source) => source.url === candidateMapsUrl)
       ? candidateMapsUrl
-      : mapsSources.find((source) => normalizeName(source.name) === normalizeName(name))?.url ?? null;
+      : mapsSources.find((source) => {
+          const normalizedSourceName = normalizeName(source.name);
+          return normalizedSourceName === normalizedLeadName ||
+            normalizedSourceName.startsWith(normalizedLeadName + " ") ||
+            normalizedLeadName.startsWith(normalizedSourceName + " ");
+        })?.url ?? null;
     const candidateSourceUrl = validHttpUrl(candidate.source_url);
     const citedWebUrl = candidateSourceUrl && allSourceUrls.has(candidateSourceUrl) ? candidateSourceUrl : null;
     const verifiedSourceUrl = citedMapsUrl ?? citedWebUrl;
@@ -182,13 +188,16 @@ export async function searchGeminiProspects(apiKey: string, requestedCity: City,
     const website = validHttpUrl(candidate.website);
     const menuUrl = validHttpUrl(candidate.menu_url);
     const cityFromModel = cleanText(candidate.city, 120);
-    if (cityFromModel && normalizeName(cityFromModel) !== normalizeName(requestedCity)) continue;
+    const normalizedReturnedCity = cityFromModel ? normalizeName(cityFromModel) : "";
+    const normalizedRequestedCity = normalizeName(requestedCity);
+    if (!normalizedReturnedCity ||
+      (normalizedReturnedCity !== normalizedRequestedCity &&
+        !normalizedReturnedCity.startsWith(normalizedRequestedCity + " "))) continue;
     if (website && menuUrl) continue;
 
     const address = cleanText(candidate.address, 400);
-    const placeId = cleanText(candidate.place_id, 180);
-    const sourceId = placeId ? "gemini:place:" + placeId
-      : citedMapsUrl ? "gemini:maps:" + stableId([citedMapsUrl])
+    const sourceId = citedMapsUrl
+      ? "gemini:maps:" + stableId([citedMapsUrl])
       : "gemini:web:" + stableId([name, requestedCity, address ?? "", verifiedSourceUrl]);
     const citedWeb = citedWebUrl ?? (verifiedSourceUrl !== citedMapsUrl ? verifiedSourceUrl : null);
     const notes = JSON.stringify({
