@@ -28,7 +28,7 @@ BEGIN
 END
 $$;
 
-REVOKE ALL ON TABLE public.leads FROM PUBLIC, anon;
+REVOKE ALL ON TABLE public.leads FROM PUBLIC, anon, authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.leads TO authenticated;
 
 CREATE POLICY leads_select_own
