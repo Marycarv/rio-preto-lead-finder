@@ -329,7 +329,10 @@ function Dashboard() {
                     <p className="font-semibold">Fontes da pesquisa Gemini</p>
                     <div className="flex flex-wrap gap-3">
                       {sources.googleMapsUrl && (
-                        <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>{sources.googleMapsName ? <span className="text-xs text-muted-foreground">{sources.googleMapsName}</span> : null}
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>
+                          {sources.googleMapsName && <span className="text-xs text-muted-foreground">{sources.googleMapsName}</span>}
+                        </span>
                       )}
                       {sources.webSourceUrl && (
                         <a href={sources.webSourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{sources.webSourceName ?? "Fonte web"}</a>
