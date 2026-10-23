@@ -36,6 +36,23 @@ type NominatimResult = {
   type?: unknown;
   address?: Record<string, unknown>;
   extratags?: Record<string, unknown>;
+  boundingbox?: unknown;
+};
+
+export type OsmBounds = {
+  south: number;
+  west: number;
+  north: number;
+  east: number;
+};
+
+type CityArea = {
+  areaId: number;
+  bounds: OsmBounds | null;
+};
+
+type RequestBudget = {
+  used: number;
 };
 type OsmElement = {
   type?: unknown;
@@ -48,6 +65,8 @@ type OsmElement = {
 type OverpassPayload = { elements: unknown[] };
 
 const MAX_RESULTS_PER_GROUP = 2500;
+const MAX_SUBDIVISION_DEPTH = 2;
+const MAX_OVERPASS_REQUESTS_PER_CITY = 40;
 const AREA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const OVERPASS_TIMEOUT_MS = 12_000;
 const NOMINATIM_TIMEOUT_MS = 8_000;
@@ -57,7 +76,7 @@ const OVERPASS_ENDPOINTS = [
   "https://overpass.private.coffee/api/interpreter",
 ] as const;
 
-const CITY_AREA_CACHE = new Map<string, { areaId: number; expiresAt: number }>();
+const CITY_AREA_CACHE = new Map<string, CityArea & { expiresAt: number }>();
 let lastNominatimRequestAt = 0;
 let lastOverpassRequestAt = 0;
 let nominatimQueue: Promise<void> = Promise.resolve();
@@ -96,6 +115,39 @@ function finiteCoordinate(value: unknown, min: number, max: number): number | nu
     : null;
 }
 
+function parseCoordinate(value: unknown, min: number, max: number): number | null {
+  const parsed = typeof value === "number"
+    ? value
+    : typeof value === "string" && value.trim().length > 0
+      ? Number(value)
+      : Number.NaN;
+  return finiteCoordinate(parsed, min, max);
+}
+
+/** Parse Nominatim's [south, north, west, east] bbox only when all bounds are valid. */
+function parseNominatimBounds(value: unknown): OsmBounds | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const south = parseCoordinate(value[0], -90, 90);
+  const north = parseCoordinate(value[1], -90, 90);
+  const west = parseCoordinate(value[2], -180, 180);
+  const east = parseCoordinate(value[3], -180, 180);
+  if (south === null || north === null || west === null || east === null) return null;
+  if (south >= north || west >= east) return null;
+  return { south, west, north, east };
+}
+
+/** Split a verified geographic extent into four overlapping-edge-safe query tiles. */
+export function splitOsmBounds(bounds: OsmBounds): OsmBounds[] {
+  const midLat = (bounds.south + bounds.north) / 2;
+  const midLon = (bounds.west + bounds.east) / 2;
+  return [
+    { south: bounds.south, west: bounds.west, north: midLat, east: midLon },
+    { south: bounds.south, west: midLon, north: midLat, east: bounds.east },
+    { south: midLat, west: bounds.west, north: bounds.north, east: midLon },
+    { south: midLat, west: midLon, north: bounds.north, east: bounds.east },
+  ];
+}
+
 async function delay(ms: number): Promise<void> {
   if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -128,10 +180,10 @@ async function waitForOverpassSlot(): Promise<void> {
   }
 }
 
-async function resolveCityArea(city: City): Promise<number> {
+async function resolveCityArea(city: City): Promise<CityArea> {
   const cacheKey = normalizePlaceName(city);
   const cached = CITY_AREA_CACHE.get(cacheKey);
-  if (cached && cached.expiresAt > Date.now()) return cached.areaId;
+  if (cached && cached.expiresAt > Date.now()) return { areaId: cached.areaId, bounds: cached.bounds };
 
   await waitForNominatimSlot();
 
@@ -176,7 +228,7 @@ async function resolveCityArea(city: City): Promise<number> {
   }
 
   const targetName = normalizePlaceName(city);
-  let areaId: number | null = null;
+  let resolvedArea: CityArea | null = null;
 
   for (const entry of rawResults) {
     if (!isRecord(entry)) continue;
@@ -208,27 +260,37 @@ async function resolveCityArea(city: City): Promise<number> {
     if (!names.some((name) => normalizePlaceName(name) === targetName)) continue;
 
     // Overpass derives the area ID from a validated OSM administrative relation.
-    areaId = 3_600_000_000 + relationId;
+    // Nominatim's bbox is derived from this verified administrative relation.
+    // It is used only to subdivide expensive queries; Overpass's area filter
+    // remains the authoritative municipal boundary.
+    resolvedArea = {
+      areaId: 3_600_000_000 + relationId,
+      bounds: parseNominatimBounds(candidate.boundingbox),
+    };
     break;
   }
 
-  if (areaId === null) {
+  if (resolvedArea === null) {
     throw new Error("Não foi possível validar os limites municipais de " + city + " no OpenStreetMap. Nenhuma coordenada foi presumida e nada foi importado.");
   }
 
-  CITY_AREA_CACHE.set(cacheKey, { areaId, expiresAt: Date.now() + AREA_CACHE_TTL_MS });
-  return areaId;
+  CITY_AREA_CACHE.set(cacheKey, { ...resolvedArea, expiresAt: Date.now() + AREA_CACHE_TTL_MS });
+  return resolvedArea;
 }
 
 function isOverpassPayload(value: unknown): value is OverpassPayload {
   return isRecord(value) && Array.isArray(value.elements);
 }
 
-async function fetchOverpass(query: string): Promise<OverpassPayload> {
+async function fetchOverpass(query: string, budget: RequestBudget): Promise<OverpassPayload> {
   let lastFailure: "network" | "rate" | "server" | "invalid" = "network";
   const attempts = Math.min(2, OVERPASS_ENDPOINTS.length);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (budget.used >= MAX_OVERPASS_REQUESTS_PER_CITY) {
+      throw new Error("A busca precisaria de mais consultas públicas do que o limite seguro permite. Nenhum resultado parcial foi salvo; tente novamente mais tarde.");
+    }
+    budget.used += 1;
     const endpointIndex = (nextOverpassEndpoint + attempt) % OVERPASS_ENDPOINTS.length;
     const endpoint = OVERPASS_ENDPOINTS[endpointIndex];
     await waitForOverpassSlot();
@@ -340,28 +402,62 @@ export function normalizeOsmElements(elements: unknown[], city: City): RawLead[]
   return [...normalized.values()];
 }
 
+function formatOverpassBounds(bounds: OsmBounds): string {
+  return "(" + [
+    bounds.south.toFixed(6),
+    bounds.west.toFixed(6),
+    bounds.north.toFixed(6),
+    bounds.east.toFixed(6),
+  ].join(",") + ")";
+}
+
+async function fetchGroupInBounds(
+  area: CityArea,
+  selector: string,
+  bounds: OsmBounds | null,
+  depth: number,
+  budget: RequestBudget,
+): Promise<unknown[]> {
+  const query =
+    "[out:json][timeout:20][maxsize:67108864];\n" +
+    "area(" + String(area.areaId) + ")->.city;\n" +
+    "(nwr(area.city)[\"name\"]" + selector +
+    (bounds === null ? "" : formatOverpassBounds(bounds)) + ";);\n" +
+    "out center tags " + String(MAX_RESULTS_PER_GROUP) + ";";
+
+  const payload = await fetchOverpass(query, budget);
+  if (payload.elements.length < MAX_RESULTS_PER_GROUP) return payload.elements;
+
+  if (bounds === null) {
+    throw new Error(
+      "A busca atingiu o limite de " + String(MAX_RESULTS_PER_GROUP) +
+      " resultados, mas a fonte não forneceu uma caixa geográfica validada para subdividir a consulta. Nenhum resultado parcial foi salvo.",
+    );
+  }
+  if (depth >= MAX_SUBDIVISION_DEPTH) {
+    throw new Error(
+      "Uma área de busca continuou acima do limite após subdivisões geográficas seguras. Nenhum resultado parcial foi salvo; reduza a abrangência ou tente novamente mais tarde.",
+    );
+  }
+
+  const subdivisions = splitOsmBounds(bounds);
+  const results: unknown[] = [];
+  for (const childBounds of subdivisions) {
+    results.push(...await fetchGroupInBounds(area, selector, childBounds, depth + 1, budget));
+  }
+  return results;
+}
+
 export async function fetchOsmLeads(inputCity: string): Promise<RawLead[]> {
   const city = CITIES.find((candidate) => normalizePlaceName(candidate) === normalizePlaceName(inputCity));
   if (!city) throw new Error("Cidade inválida.");
 
-  const areaId = await resolveCityArea(city);
+  const area = await resolveCityArea(city);
+  const budget: RequestBudget = { used: 0 };
   const allElements: unknown[] = [];
 
   for (const group of QUERY_GROUPS) {
-    const query =
-      "[out:json][timeout:20][maxsize:67108864];\n" +
-      "area(" + String(areaId) + ")->.city;\n" +
-      "(nwr(area.city)[\"name\"]" + group.selector + ";);\n" +
-      "out center tags " + String(MAX_RESULTS_PER_GROUP) + ";";
-
-    const payload = await fetchOverpass(query);
-    if (payload.elements.length >= MAX_RESULTS_PER_GROUP) {
-      throw new Error(
-        "A busca atingiu o limite de " + String(MAX_RESULTS_PER_GROUP) +
-        " resultados em uma categoria. Nenhum resultado parcial foi salvo; tente novamente mais tarde.",
-      );
-    }
-    allElements.push(...payload.elements);
+    allElements.push(...await fetchGroupInBounds(area, group.selector, area.bounds, 0, budget));
   }
 
   return normalizeOsmElements(allElements, city);
