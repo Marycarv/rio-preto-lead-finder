@@ -110,7 +110,7 @@ describe("Gemini Google Search research", () => {
     expect(String(url)).not.toContain("secret-gemini-key");
     expect(new Headers(init?.headers).get("x-goog-api-key")).toBe("secret-gemini-key");
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gemini-2.5-flash");
+    expect(body["model"]).toBe("gemini-3.8-flash");
     expect(body["store"]).toBe(false);
     expect(body["tools"]).toEqual([{ type: "google_search" }]);
     expect(body["response_format"]).toBeUndefined();
@@ -154,7 +154,7 @@ describe("Gemini Google Search research", () => {
     });
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gemini-2.5-flash");
+    expect(body["model"]).toBe("gemini-3.8-flash");
     expect(body["tools"]).toBeUndefined();
     expect(body["response_format"]).toMatchObject({ type: "text", mime_type: "application/json" });
   });

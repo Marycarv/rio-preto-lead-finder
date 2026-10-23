@@ -15,7 +15,7 @@ type RawCandidate = {
 };
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const GEMINI_MODEL = "gemini-2.5-flash";
+const GEMINI_MODEL = "gemini-3.8-flash";
 const MAX_PROSPECTS = 10;
 const GEMINI_TIMEOUT_MS = 90_000;
 
