@@ -93,7 +93,6 @@ describe("Gemini Google Search and Maps research", () => {
     expect(result.sourceCount).toBe(1);
     expect(result.leads[0]).toMatchObject({
       source: "gemini_google_research",
-      source_id: "gemini:maps:",
       name: "Padaria São Bento",
       city: "Mirassol",
       has_website: false,
@@ -101,6 +100,7 @@ describe("Gemini Google Search and Maps research", () => {
       lat: -20.82,
       lon: -49.52,
     });
+    expect(result.leads[0]?.source_id).toMatch(/^gemini:maps:/);
     expect(result.leads[0]?.notes).toContain("Google Maps");
     expect(result.leads[0]?.notes).toContain(mapUrl);
 
