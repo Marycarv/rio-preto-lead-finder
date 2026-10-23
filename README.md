@@ -1,24 +1,28 @@
-# Rio Preto Lead Finder
+# ADVEXON Prospect
 
-preciso que vc crie um site que busque todos os leads da cidade e regiao de sção jose do rio preto que nao tem sites ou cardapios e que tenha uma ia que automaticamente envie uma mensagem oferencendo a demonstração do projeto sem custo e que informando aumentraias as vendas e tals o preojeto ta ai
+Aplicativo de prospecção assistida para encontrar negócios locais que podem precisar de um site profissional ou cardápio digital.
 
-This project was built with [Lovable](https://lovable.dev).
+## Pesquisa com Gemini
 
-## Build with Lovable
+A busca usa uma única integração do Gemini API, com Google Search e Google Maps grounding habilitados na mesma interação. O Gemini pesquisa a cidade e o tema escolhido, retorna negócios com fontes verificáveis e o aplicativo mostra os links de referência. A busca retorna até 10 oportunidades por vez; não promete listar todos os negócios.
 
-Continue developing this project in the [Lovable editor](https://lovable.dev/projects/8a69119f-c124-4085-95bf-88abce9f0b3d).
+O mesmo Gemini gera o resumo, a pontuação e a sugestão de mensagem comercial. Toda mensagem continua sujeita à aprovação manual. O aplicativo não envia mensagens automaticamente.
 
-- **Ship faster**: describe what you want to build and Lovable handles the code.
-- **Stay in sync**: every change made in Lovable is committed straight to this repository.
-- **Full ownership**: this code is yours. Push to `main` on GitHub and your changes sync back into Lovable, ready for your next prompt.
+### Configuração
 
-## Development
+No Lovable Cloud, adicione a variável secreta de servidor `GEMINI_API_KEY`. Obtenha uma chave no [Google AI Studio](https://aistudio.google.com/apikey). Não adicione essa chave ao código nem a exponha no navegador.
 
-Prefer working locally? You need Node.js and npm — [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating).
+A API pode cobrar pelo uso de Google Search/Google Maps grounding depois da franquia da conta. Confira [os preços oficiais do Gemini](https://ai.google.dev/gemini-api/docs/pricing) e o consumo antes de pesquisar repetidamente.
+
+## Desenvolvimento
+
+O projeto foi criado com [Lovable](https://lovable.dev) e é sincronizado com o repositório.
 
 ```sh
 git clone <this-repository-url>
 cd <repository-name>
-npm i
+npm install
 npm run dev
 ```
+
+Consulte [docs/security-and-deployment.md](docs/security-and-deployment.md) para configuração do Supabase, grounding do Gemini, custos e pontos de atenção sobre privacidade.
