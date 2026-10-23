@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { createWhatsAppUrl } from "@/lib/lead-validation";
 
 export const Route = createFileRoute("/_authenticated/dashboard")({
   head: () => ({
@@ -30,13 +31,6 @@ type Lead = {
   status: string; approved: boolean;
 };
 
-function waLink(l: Lead, msg: string) {
-  let n = (l.whatsapp || l.phone || "").replace(/\D/g, "");
-  if (!n) return null;
-  if (!n.startsWith("55")) n = "55" + n;
-  return `https://wa.me/${n}?text=${encodeURIComponent(msg)}`;
-}
-
 function Dashboard() {
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -52,39 +46,67 @@ function Dashboard() {
   const [draft, setDraft] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  const { data: leads = [] } = useQuery({
-    queryKey: ["leads"],
+  const [filterStatus, setFilterStatus] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 50;
+
+  const leadsQuery = useQuery({
+    queryKey: ["leads", page, pageSize, onlyNoSite, onlyPhone, filterCity, filterStatus, q],
     queryFn: async () => {
-      const all: Lead[] = [];
-      for (let from = 0; ; from += 1000) {
-        const { data, error } = await supabase.from("leads").select("*").order("created_at", { ascending: false }).range(from, from + 999);
-        if (error) throw error;
-        all.push(...(data as Lead[]));
-        if (!data || data.length < 1000) break;
-      }
-      return all;
+      let query = supabase
+        .from("leads")
+        .select("id,name,category,city,address,phone,whatsapp,website,has_website,has_menu,source,fetched_at,ai_score,ai_summary,ai_message,status,approved", { count: "exact" })
+        .order("created_at", { ascending: false })
+        .range((page - 1) * pageSize, page * pageSize - 1);
+
+      if (onlyNoSite) query = query.eq("has_website", false);
+      if (onlyPhone) query = query.or("phone.not.is.null,whatsapp.not.is.null");
+      if (filterCity) query = query.eq("city", filterCity);
+      if (filterStatus) query = query.eq("status", filterStatus);
+
+      // Strip PostgREST filter syntax before embedding user-provided search text.
+      const safeQuery = q.replace(/[^\p{L}\p{N}\s-]/gu, " ").replace(/\s+/g, " ").trim().slice(0, 80);
+      if (safeQuery) query = query.or(`name.ilike.%${safeQuery}%,category.ilike.%${safeQuery}%`);
+
+      const { data, count, error } = await query;
+      if (error) throw error;
+      return { rows: (data ?? []) as Lead[], count: count ?? 0 };
     },
   });
 
-  const filtered = useMemo(() => leads.filter((l) =>
-    (!onlyNoSite || !l.has_website) && (!onlyPhone || l.phone || l.whatsapp) &&
-    (!filterCity || l.city === filterCity) &&
-    (!q || `${l.name} ${l.category ?? ""}`.toLowerCase().includes(q.toLowerCase()))
-  ), [leads, onlyNoSite, onlyPhone, filterCity, q]);
+  const statsQuery = useQuery({
+    queryKey: ["lead-stats"],
+    queryFn: async () => {
+      const [all, noSite, analyzed, approved] = await Promise.all([
+        supabase.from("leads").select("id", { count: "exact", head: true }),
+        supabase.from("leads").select("id", { count: "exact", head: true }).eq("has_website", false),
+        supabase.from("leads").select("id", { count: "exact", head: true }).not("ai_message", "is", null),
+        supabase.from("leads").select("id", { count: "exact", head: true }).eq("approved", true),
+      ]);
+      if (all.error || noSite.error || analyzed.error || approved.error) {
+        throw new Error("Não foi possível consultar as contagens do painel.");
+      }
+      return {
+        total: all.count ?? 0,
+        noSite: noSite.count ?? 0,
+        analyzed: analyzed.count ?? 0,
+        approved: approved.count ?? 0,
+      };
+    },
+  });
 
-  const stats = {
-    total: leads.length,
-    noSite: leads.filter((l) => !l.has_website).length,
-    analyzed: leads.filter((l) => l.ai_message).length,
-    approved: leads.filter((l) => l.approved).length,
-  };
+  const leads = leadsQuery.data?.rows ?? [];
+  const filteredCount = leadsQuery.data?.count ?? 0;
+  const totalPages = Math.max(1, Math.ceil(filteredCount / pageSize));
+  const stats = statsQuery.data;
 
   async function doImport() {
     setImporting(true);
     try {
       const r = await runImport({ data: { city } });
       toast.success(`${r.found} encontrados em ${city} (${r.withoutSite} sem site). ${r.inserted} novos salvos.`);
-      qc.invalidateQueries({ queryKey: ["leads"] });
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      await qc.invalidateQueries({ queryKey: ["lead-stats"] });
     } catch (e) { toast.error((e as Error).message); }
     finally { setImporting(false); }
   }
@@ -95,22 +117,48 @@ function Dashboard() {
       const r = await runAnalyze({ data: { id: l.id } });
       const updated = { ...l, ai_score: r.score, ai_summary: r.summary, ai_message: r.message, status: "analisado" };
       setSel(updated); setDraft(r.message);
-      qc.invalidateQueries({ queryKey: ["leads"] });
-    } catch (e) { toast.error((e as Error).message); }
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      await qc.invalidateQueries({ queryKey: ["lead-stats"] });
+    } catch { toast.error("Não foi possível analisar este lead. Tente novamente."); }
     finally { setBusyId(null); }
   }
 
   async function approve(l: Lead) {
-    const { error } = await supabase.from("leads").update({ ai_message: draft, approved: true, status: "aprovado" }).eq("id", l.id);
-    if (error) { toast.error(error.message); return; }
-    setSel({ ...l, ai_message: draft, approved: true, status: "aprovado" });
-    qc.invalidateQueries({ queryKey: ["leads"] });
+    const approvedMessage = draft.trim();
+    if (!approvedMessage || approvedMessage.length > 1000) {
+      toast.error("Revise a mensagem: ela não pode estar vazia nem ultrapassar 1.000 caracteres.");
+      return;
+    }
+    const { data: updated, error } = await supabase
+      .from("leads")
+      .update({ ai_message: approvedMessage, approved: true, status: "aprovado" })
+      .eq("id", l.id)
+      .select("id")
+      .maybeSingle();
+    if (error || !updated) { toast.error("Não foi possível salvar a aprovação. Tente novamente."); return; }
+    setSel({ ...l, ai_message: approvedMessage, approved: true, status: "aprovado" });
+    await qc.invalidateQueries({ queryKey: ["leads"] });
+    await qc.invalidateQueries({ queryKey: ["lead-stats"] });
     toast.success("Mensagem aprovada.");
   }
 
   async function markSent(l: Lead) {
-    await supabase.from("leads").update({ status: "contatado" }).eq("id", l.id);
-    qc.invalidateQueries({ queryKey: ["leads"] });
+    if (!l.approved) {
+      toast.error("Aprove a mensagem antes de registrar o contato.");
+      return;
+    }
+    const { data: updated, error } = await supabase
+      .from("leads")
+      .update({ status: "contatado" })
+      .eq("id", l.id)
+      .eq("approved", true)
+      .select("id")
+      .maybeSingle();
+    if (error || !updated) { toast.error("Não foi possível registrar o contato. Confirme a aprovação e tente novamente."); return; }
+    setSel({ ...l, status: "contatado" });
+    await qc.invalidateQueries({ queryKey: ["leads"] });
+    await qc.invalidateQueries({ queryKey: ["lead-stats"] });
+    toast.success("Contato registrado manualmente.");
   }
 
   async function signOut() {
@@ -133,7 +181,7 @@ function Dashboard() {
       </header>
 
       <div className="mb-5 grid grid-cols-2 gap-3 md:grid-cols-4">
-        {[["Leads", stats.total], ["Sem site", stats.noSite], ["Analisados pela IA", stats.analyzed], ["Aprovados", stats.approved]].map(([k, v]) => (
+        {[["Leads", stats?.total ?? "—"], ["Sem site", stats?.noSite ?? "—"], ["Analisados pela IA", stats?.analyzed ?? "—"], ["Aprovados", stats?.approved ?? "—"]].map(([k, v]) => (
           <div key={k} className="rounded-2xl border bg-card p-4">
             <div className="text-xs text-muted-foreground">{k}</div>
             <div className="mt-1 font-display text-3xl font-extrabold">{v}</div>
@@ -155,13 +203,20 @@ function Dashboard() {
       <div className="grid gap-5 lg:grid-cols-[1fr_420px]">
         <section className="rounded-2xl border bg-card p-4">
           <div className="mb-3 flex flex-wrap gap-2">
-            <Input placeholder="Buscar nome ou categoria" value={q} onChange={(e) => setQ(e.target.value)} className="max-w-xs" />
-            <select value={filterCity} onChange={(e) => setFilterCity(e.target.value)} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
+            <Input placeholder="Buscar nome ou categoria" value={q} onChange={(e) => { setQ(e.target.value); setPage(1); }} className="max-w-xs" />
+            <select value={filterCity} onChange={(e) => { setFilterCity(e.target.value); setPage(1); }} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
               <option value="">Todas as cidades</option>
               {CITIES.map((c) => <option key={c}>{c}</option>)}
             </select>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyNoSite} onChange={(e) => setOnlyNoSite(e.target.checked)} /> Só sem site</label>
-            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyPhone} onChange={(e) => setOnlyPhone(e.target.checked)} /> Com telefone</label>
+            <select value={filterStatus} onChange={(e) => { setFilterStatus(e.target.value); setPage(1); }} className="h-9 rounded-md border bg-input/30 px-3 text-sm" aria-label="Filtrar por status">
+              <option value="">Todos os status</option>
+              <option value="novo">Novo</option>
+              <option value="analisado">Analisado</option>
+              <option value="aprovado">Aprovado</option>
+              <option value="contatado">Contatado</option>
+            </select>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyNoSite} onChange={(e) => { setOnlyNoSite(e.target.checked); setPage(1); }} /> Só sem site</label>
+            <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={onlyPhone} onChange={(e) => { setOnlyPhone(e.target.checked); setPage(1); }} /> Com telefone</label>
           </div>
           <div className="max-h-[70vh] overflow-auto">
             <table className="w-full text-sm">
@@ -169,7 +224,7 @@ function Dashboard() {
                 <tr><th className="p-2">Negócio</th><th className="p-2">Cidade</th><th className="p-2">Contato</th><th className="p-2">Status</th></tr>
               </thead>
               <tbody>
-                {filtered.slice(0, 500).map((l) => (
+                {leads.map((l) => (
                   <tr key={l.id} onClick={() => { setSel(l); setDraft(l.ai_message ?? ""); }}
                     className={`cursor-pointer border-t hover:bg-muted ${sel?.id === l.id ? "bg-muted" : ""}`}>
                     <td className="p-2"><div className="font-semibold">{l.name}</div><div className="text-xs text-muted-foreground">{l.category}</div></td>
@@ -178,9 +233,21 @@ function Dashboard() {
                     <td className="p-2"><Badge variant={l.approved ? "default" : "secondary"}>{l.status}{l.ai_score != null ? ` · ${l.ai_score}` : ""}</Badge></td>
                   </tr>
                 ))}
-                {filtered.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Nenhum lead. Escolha uma cidade e clique em "Buscar leads".</td></tr>}
+                {leadsQuery.isLoading && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Carregando leads…</td></tr>}
+                {leadsQuery.isError && <tr><td colSpan={4} className="p-8 text-center text-destructive">Não foi possível carregar os leads. Verifique sua conexão e tente novamente. <button type="button" className="underline" onClick={() => void leadsQuery.refetch()}>Tentar novamente</button></td></tr>}
+                {!leadsQuery.isLoading && !leadsQuery.isError && leads.length === 0 && <tr><td colSpan={4} className="p-8 text-center text-muted-foreground">Nenhum lead encontrado para estes filtros.</td></tr>}
               </tbody>
             </table>
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-sm">
+              <span className="text-muted-foreground">
+                {leadsQuery.isError ? "Contagem indisponível" : `${filteredCount} lead(s) · Página ${page} de ${totalPages}`}
+              </span>
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" disabled={page <= 1 || leadsQuery.isFetching} onClick={() => setPage((current) => Math.max(1, current - 1))}>Anterior</Button>
+                <Button variant="outline" size="sm" disabled={page >= totalPages || leadsQuery.isFetching} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>Próxima</Button>
+              </div>
+            </div>
+            {statsQuery.isError && <p className="mt-2 text-xs text-destructive">Não foi possível atualizar as contagens totais; tente recarregar o painel.</p>}
           </div>
         </section>
 
@@ -204,10 +271,18 @@ function Dashboard() {
                   <Textarea rows={8} value={draft} onChange={(e) => setDraft(e.target.value)} />
                   <Button className="w-full" onClick={() => approve(sel)}>{sel.approved ? "Salvar edição" : "Aprovar mensagem"}</Button>
                   {sel.approved && (() => {
-                    const link = waLink(sel, draft);
-                    return link
-                      ? <Button asChild variant="outline" className="w-full"><a href={link} target="_blank" rel="noreferrer" onClick={() => markSent(sel)}>Abrir no WhatsApp</a></Button>
-                      : <p className="text-xs text-muted-foreground">Sem telefone na fonte — copie a mensagem e envie manualmente.</p>;
+                    const link = createWhatsAppUrl(sel.whatsapp, draft) ?? createWhatsAppUrl(sel.phone, draft);
+                    return (
+                      <>
+                        {link
+                          ? <Button asChild variant="outline" className="w-full"><a href={link} target="_blank" rel="noreferrer">Abrir no WhatsApp</a></Button>
+                          : <p className="text-xs text-muted-foreground">Telefone ausente ou inválido — confirme o número na fonte antes de enviar.</p>}
+                        {sel.approved && sel.status !== "contatado" && (
+                          <Button variant="secondary" className="w-full" onClick={() => markSent(sel)}>Registrar contato realizado</Button>
+                        )}
+                        {sel.status === "contatado" && <p className="text-xs text-muted-foreground">Contato registrado manualmente.</p>}
+                      </>
+                    );
                   })()}
                 </>
               )}
