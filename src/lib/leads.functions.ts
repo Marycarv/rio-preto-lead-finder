@@ -84,7 +84,7 @@ export const importLeads = createServerFn({ method: "POST" })
 
     return {
       status: "processing" as const,
-      taskToken: createOutscraperTaskToken(started.requestId, context.userId, data.city, apiKey),
+      taskToken: await createOutscraperTaskToken(started.requestId, context.userId, data.city, apiKey),
     };
   });
 
@@ -97,7 +97,7 @@ export const getLeadImportStatus = createServerFn({ method: "POST" })
   })
   .handler(async ({ data, context }) => {
     const apiKey = getOutscraperKey();
-    const claim = verifyOutscraperTaskToken(data.taskToken, context.userId, apiKey);
+    const claim = await verifyOutscraperTaskToken(data.taskToken, context.userId, apiKey);
     if (!claim) {
       throw new Error("Esta busca expirou ou não pertence à sua sessão. Inicie uma nova busca.");
     }
