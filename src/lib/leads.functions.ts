@@ -3,21 +3,8 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/integrations/supabase/types";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { CITIES } from "./sources/cities";
-import {
-  createOutscraperTaskToken,
-  getOutscraperSearchResults,
-  normalizeOutscraperResults,
-  startOutscraperSearch,
-  verifyOutscraperTaskToken,
-  type ProspectLead,
-} from "./sources/outscraper";
-import {
-  analyzeInputSchema,
-  importInputSchema,
-  importStatusInputSchema,
-  readOpenAiJsonStream,
-  validateLeadAnalysis,
-} from "./lead-validation";
+import { generateLeadAnalysisWithGemini, searchGeminiProspects, type GeminiProspect } from "./sources/gemini";
+import { analyzeInputSchema, geminiSearchInputSchema, validateLeadAnalysis } from "./lead-validation";
 
 type ImportSummary = {
   status: "complete";
@@ -25,100 +12,63 @@ type ImportSummary = {
   inserted: number;
   withoutSite: number;
   withoutMenu: number;
+  citations: number;
 };
 
-async function saveImportedLeads(
-  raw: ProspectLead[],
+function getGeminiKey(): string {
+  const key = process.env["GEMINI_API_KEY"];
+  if (!key) throw new Error("A chave GEMINI_API_KEY não está configurada nos Secrets do Lovable Cloud.");
+  return key;
+}
+
+async function saveGeminiProspects(
+  leads: GeminiProspect[],
   userId: string,
   supabase: SupabaseClient<Database>,
+  citations: number,
 ): Promise<ImportSummary> {
   const now = new Date().toISOString();
-  const rows = raw.map((lead) => ({ ...lead, user_id: userId, fetched_at: now }));
+  const rows = leads.map((lead) => ({ ...lead, user_id: userId, fetched_at: now }));
   let inserted = 0;
 
-  for (let index = 0; index < rows.length; index += 200) {
-    const chunk = rows.slice(index, index + 200);
+  for (let index = 0; index < rows.length; index += 100) {
+    const chunk = rows.slice(index, index + 100);
     const { data: result, error } = await supabase
       .from("leads")
       .upsert(chunk, { onConflict: "user_id,source,source_id", ignoreDuplicates: true })
       .select("id");
 
     if (error) {
-      console.error("[leads.import] Database write failed", { code: error.code ?? "unknown" });
-      throw new Error("Não foi possível salvar os leads desta busca. Tente novamente; a importação pode ser repetida com segurança.");
+      console.error("[leads.geminiSearch] Database write failed", { code: error.code ?? "unknown" });
+      throw new Error("Não foi possível salvar os resultados da pesquisa Gemini. A busca pode ser repetida com segurança.");
     }
     inserted += result?.length ?? 0;
   }
 
   return {
     status: "complete",
-    found: raw.length,
+    found: leads.length,
     inserted,
-    withoutSite: raw.filter((lead) => !lead.has_website).length,
-    withoutMenu: raw.filter((lead) => !lead.has_menu).length,
+    withoutSite: leads.filter((lead) => !lead.has_website).length,
+    withoutMenu: leads.filter((lead) => !lead.has_menu).length,
+    citations,
   };
-}
-
-function getOutscraperKey(): string {
-  const key = process.env["OUTSCRAPER_API_KEY"];
-  if (!key) {
-    throw new Error("A fonte Google Maps precisa da variável secreta OUTSCRAPER_API_KEY. Crie uma chave na Outscraper e adicione-a aos Secrets do Lovable Cloud.");
-  }
-  return key;
 }
 
 export const importLeads = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: unknown) => {
-    const parsed = importInputSchema.safeParse(input);
-    if (!parsed.success) throw new Error("Cidade inválida.");
+    const parsed = geminiSearchInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error("Revise a cidade e o tema da pesquisa.");
     return parsed.data;
   })
   .handler(async ({ data, context }) => {
-    const apiKey = getOutscraperKey();
-    const started = await startOutscraperSearch(apiKey, data.city);
-    if (started.status === "complete") {
-      const raw = normalizeOutscraperResults(started.data, data.city);
-      return saveImportedLeads(raw, context.userId, context.supabase);
+    const search = await searchGeminiProspects(getGeminiKey(), data.city, data.query);
+    if (search.leads.length === 0) {
+      throw new Error("O Gemini não encontrou negócios com fontes verificáveis para esta pesquisa. Tente outra categoria ou cidade.");
     }
-
-    return {
-      status: "processing" as const,
-      taskToken: await createOutscraperTaskToken(started.requestId, context.userId, data.city, apiKey),
-    };
+    return saveGeminiProspects(search.leads, context.userId, context.supabase, search.sourceCount);
   });
-
-export const getLeadImportStatus = createServerFn({ method: "POST" })
-  .middleware([requireSupabaseAuth])
-  .inputValidator((input: unknown) => {
-    const parsed = importStatusInputSchema.safeParse(input);
-    if (!parsed.success) throw new Error("Identificador da busca inválido.");
-    return parsed.data;
-  })
-  .handler(async ({ data, context }) => {
-    const apiKey = getOutscraperKey();
-    const claim = await verifyOutscraperTaskToken(data.taskToken, context.userId, apiKey);
-    if (!claim) {
-      throw new Error("Esta busca expirou ou não pertence à sua sessão. Inicie uma nova busca.");
-    }
-
-    const task = await getOutscraperSearchResults(apiKey, claim.requestId);
-    if (task.status === "processing") return { status: "processing" as const };
-
-    const raw = normalizeOutscraperResults(task.data, claim.city);
-    return saveImportedLeads(raw, context.userId, context.supabase);
-  });
-
-const AI_RESPONSE_SCHEMA = {
-  type: "object",
-  additionalProperties: false,
-  required: ["score", "summary", "message"],
-  properties: {
-    score: { type: "integer", minimum: 0, maximum: 100, description: "Potencial de conversão de 0 a 100" },
-    summary: { type: "string", minLength: 1, maxLength: 400 },
-    message: { type: "string", minLength: 1, maxLength: 1000 },
-  },
-} as const;
 
 export const analyzeLead = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -137,8 +87,8 @@ export const analyzeLead = createServerFn({ method: "POST" })
 
     if (readError || !lead) throw new Error("Lead não encontrado.");
 
-    const key = process.env["LOVABLE_API_KEY"];
-    if (!key) throw new Error("A análise por IA não está configurada.");
+    const key = process.env["GEMINI_API_KEY"];
+    if (!key) throw new Error("A chave GEMINI_API_KEY não está configurada nos Secrets do Lovable Cloud.");
 
     // Only the business details needed to personalize the analysis are sent.
     const facts = {
@@ -149,48 +99,7 @@ export const analyzeLead = createServerFn({ method: "POST" })
       cardapio_online: lead.has_menu ? "identificado na fonte" : "não identificado na fonte",
     };
 
-    let response: Response;
-    try {
-      response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${key}`,
-          "X-Lovable-AIG-SDK": "fetch",
-        },
-        body: JSON.stringify({
-          model: "google/gemini-3.8-flash",
-          stream: true,
-          response_format: {
-            type: "json_schema",
-            json_schema: { name: "lead", strict: true, schema: AI_RESPONSE_SCHEMA },
-          },
-          messages: [
-            {
-              role: "system",
-              content:
-                "Você é um consultor comercial da ADVEXON, que cria sites e cardápios digitais para negócios locais. Use SOMENTE os fatos fornecidos; nunca invente dados, números, avaliações ou nomes de pessoas. Gere score (0-100) de potencial, summary (1-2 frases explicando a classificação) e message: mensagem curta de WhatsApp em português do Brasil, cordial e sem exageros, oferecendo uma demonstração gratuita e sem compromisso de um site/cardápio digital. Explique de forma realista que a solução pode ajudar a apresentar o negócio e seus produtos, sem prometer aumento garantido de clientes ou vendas. Termine perguntando se pode enviar a demonstração.",
-            },
-            { role: "user", content: JSON.stringify(facts) },
-          ],
-        }),
-        signal: AbortSignal.timeout(45_000),
-      });
-    } catch {
-      throw new Error("Não foi possível conectar ao serviço de IA. Tente novamente mais tarde.");
-    }
-
-    if (!response.ok) {
-      if (response.status === 429) throw new Error("Muitas solicitações à IA. Aguarde um pouco.");
-      if (response.status === 402) throw new Error("Os créditos de IA estão esgotados no workspace.");
-      if (response.status === 401 || response.status === 403) {
-        throw new Error("O serviço de IA recusou a solicitação. Verifique a configuração no servidor.");
-      }
-      throw new Error("O serviço de IA está indisponível ou retornou um erro. Tente novamente mais tarde.");
-    }
-    if (!response.body) throw new Error("O serviço de IA retornou uma resposta vazia.");
-
-    const untrustedResult = await readOpenAiJsonStream(response.body);
+    const untrustedResult = await generateLeadAnalysisWithGemini(key, facts);
     const result = validateLeadAnalysis(untrustedResult);
 
     const { data: updatedLead, error: writeError } = await context.supabase
