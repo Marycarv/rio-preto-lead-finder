@@ -31,6 +31,39 @@ type Lead = {
   status: string; approved: boolean; notes: string | null;
 };
 
+type LeadResearchNotes = {
+  sourceLabel: string | null;
+  googleMapsUrl: string | null;
+  webSourceUrl: string | null;
+  menuUrl: string | null;
+  evidence: string | null;
+};
+
+function parseLeadResearchNotes(value: string | null): LeadResearchNotes | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    const safeUrl = (input: unknown) => {
+      if (typeof input !== "string") return null;
+      try {
+        const url = new URL(input);
+        return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+      } catch { return null; }
+    };
+    return {
+      sourceLabel: typeof row["sourceLabel"] === "string" ? row["sourceLabel"] : null,
+      googleMapsUrl: safeUrl(row["googleMapsUrl"]),
+      webSourceUrl: safeUrl(row["webSourceUrl"]),
+      menuUrl: safeUrl(row["menuUrl"]),
+      evidence: typeof row["evidence"] === "string" ? row["evidence"] : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 function Dashboard() {
   const qc = useQueryClient();
   const nav = useNavigate();
@@ -284,6 +317,27 @@ function Dashboard() {
                 <div><span className="text-muted-foreground">Site:</span> {sel.website ?? "nenhum identificado"}</div>
                 <div className="text-xs text-muted-foreground">Fonte: {sel.source} · consultado em {new Date(sel.fetched_at).toLocaleString("pt-BR")}</div>
               </dl>
+              {(() => {
+                const sources = parseLeadResearchNotes(sel.notes);
+                if (!sources) return null;
+                return (
+                  <div className="space-y-2 rounded-lg border bg-card p-3 text-sm">
+                    <p className="font-semibold">Fontes da pesquisa Gemini</p>
+                    <div className="flex flex-wrap gap-3">
+                      {sources.googleMapsUrl && (
+                        <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>
+                      )}
+                      {sources.webSourceUrl && (
+                        <a href={sources.webSourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Fonte web</a>
+                      )}
+                      {sources.menuUrl && (
+                        <a href={sources.menuUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Cardápio online</a>
+                      )}
+                    </div>
+                    {sources.evidence && <p className="text-xs text-muted-foreground">{sources.evidence}</p>}
+                  </div>
+                );
+              })()}
               <Button variant="secondary" className="w-full" disabled={busyId === sel.id} onClick={() => doAnalyze(sel)}>
                 {busyId === sel.id ? "IA analisando..." : sel.ai_message ? "Gerar nova mensagem" : "Analisar e escrever mensagem com IA"}
               </Button>
