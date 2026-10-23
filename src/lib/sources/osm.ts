@@ -279,7 +279,7 @@ async function resolveCityArea(city: City): Promise<CityArea> {
 }
 
 function isOverpassPayload(value: unknown): value is OverpassPayload {
-  return isRecord(value) && Array.isArray(value.elements);
+  return isRecord(value) && Array.isArray(value["elements"]);
 }
 
 async function fetchOverpass(query: string, budget: RequestBudget): Promise<OverpassPayload> {
@@ -293,6 +293,10 @@ async function fetchOverpass(query: string, budget: RequestBudget): Promise<Over
     budget.used += 1;
     const endpointIndex = (nextOverpassEndpoint + attempt) % OVERPASS_ENDPOINTS.length;
     const endpoint = OVERPASS_ENDPOINTS[endpointIndex];
+    if (!endpoint) {
+      lastFailure = "network";
+      continue;
+    }
     await waitForOverpassSlot();
 
     try {
