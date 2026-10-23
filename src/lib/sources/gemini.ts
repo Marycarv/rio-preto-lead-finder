@@ -181,16 +181,20 @@ export async function searchGeminiProspects(apiKey: string, requestedCity: City,
     if (!name) continue;
     const candidateMapsUrl = validHttpUrl(candidate.google_maps_url);
     const normalizedLeadName = normalizeName(name);
-    const citedMapsUrl = candidateMapsUrl && mapsSources.some((source) => source.url === candidateMapsUrl)
-      ? candidateMapsUrl
-      : mapsSources.find((source) => {
-          const normalizedSourceName = normalizeName(source.name);
-          return normalizedSourceName === normalizedLeadName ||
-            normalizedSourceName.startsWith(normalizedLeadName + " ") ||
-            normalizedLeadName.startsWith(normalizedSourceName + " ");
-        })?.url ?? null;
+    const citedMapsSource = (candidateMapsUrl
+      ? mapsSources.find((source) => source.url === candidateMapsUrl)
+      : undefined) ?? mapsSources.find((source) => {
+        const normalizedSourceName = normalizeName(source.name);
+        return normalizedSourceName === normalizedLeadName ||
+          normalizedSourceName.startsWith(normalizedLeadName + " ") ||
+          normalizedLeadName.startsWith(normalizedSourceName + " ");
+      });
+    const citedMapsUrl = citedMapsSource?.url ?? null;
     const candidateSourceUrl = validHttpUrl(candidate.source_url);
-    const citedWebUrl = candidateSourceUrl && allSourceUrls.has(candidateSourceUrl) ? candidateSourceUrl : null;
+    const citedWebSource = candidateSourceUrl && allSourceUrls.has(candidateSourceUrl)
+      ? interaction.sources.find((source) => source.url === candidateSourceUrl)
+      : undefined;
+    const citedWebUrl = citedWebSource?.url ?? null;
     const verifiedSourceUrl = citedMapsUrl ?? citedWebUrl;
     if (!verifiedSourceUrl) continue;
 
@@ -211,7 +215,11 @@ export async function searchGeminiProspects(apiKey: string, requestedCity: City,
     const citedWeb = citedWebUrl ?? (verifiedSourceUrl !== citedMapsUrl ? verifiedSourceUrl : null);
     const notes = JSON.stringify({
       sourceLabel: citedMapsUrl ? "Google Maps" : "Google Search",
-      googleMapsUrl: citedMapsUrl, webSourceUrl: citedWeb, menuUrl,
+      googleMapsUrl: citedMapsUrl,
+      googleMapsName: citedMapsSource?.name ?? null,
+      webSourceUrl: citedWeb,
+      webSourceName: citedWebSource?.name ?? null,
+      menuUrl,
       evidence: cleanText(candidate.reason, 600),
     });
     const prospect: GeminiProspect = {
