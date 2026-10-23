@@ -15,7 +15,7 @@ type RawCandidate = {
 };
 
 const GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta/interactions";
-const GEMINI_MODEL = "gemini-3.8-flash";
+const GEMINI_MODEL = "gemini-2.5-flash";
 const MAX_PROSPECTS = 10;
 const GEMINI_TIMEOUT_MS = 90_000;
 
@@ -119,10 +119,9 @@ async function runGeminiInteraction(
 ): Promise<{ value: unknown; sources: GroundingSource[] }> {
   const body: JsonRecord = { model: GEMINI_MODEL, input, store: false };
   if (useGoogleTools) {
-    // Use JSON-only prompting for the grounded response; keep structured output
-    // enforcement for the normal text-only message-writing call. This avoids
-    // relying on an unconfirmed combination of Maps grounding + response schema.
-    body["tools"] = [{ type: "google_search" }, { type: "google_maps" }];
+    // Use Google Search only. This model has a published free Search-grounding
+    // quota, while Maps grounding / combined tools require different quota tiers.
+    body["tools"] = [{ type: "google_search" }];
   } else {
     body["response_format"] = { type: "text", mime_type: "application/json", schema };
   }
@@ -138,13 +137,43 @@ async function runGeminiInteraction(
   } catch {
     throw new Error("Não foi possível conectar ao Gemini. Verifique a conexão e tente novamente.");
   }
-  if (response.status === 401 || response.status === 403) throw new Error("A chave GEMINI_API_KEY foi recusada. Confira o segredo no Lovable Cloud.");
-  if (response.status === 429) throw new Error("O Gemini atingiu o limite de solicitações ou de pesquisa. Aguarde e confira o uso da API.");
-  if (response.status === 402) throw new Error("A API do Gemini não aceitou a solicitação por cobrança. Confira o faturamento do Google AI.");
-  if (!response.ok) throw new Error("O Gemini respondeu com erro HTTP " + String(response.status) + ". Confira a configuração da API e tente novamente.");
   let payload: unknown;
   try { payload = await response.json(); }
-  catch { throw new Error("O Gemini retornou uma resposta inválida."); }
+  catch {
+    if (response.status === 429) {
+      throw new Error("A API Gemini recusou a pesquisa por cota ou limite de uso. Confira as cotas e o nível de uso do projeto no Google AI Studio.");
+    }
+    if (response.status === 402) {
+      throw new Error("A API do Gemini não aceitou a solicitação por cobrança. Confira o faturamento do Google AI.");
+    }
+    if (!response.ok) throw new Error("O Gemini respondeu com erro HTTP " + String(response.status) + ". Confira a configuração da API e tente novamente.");
+    throw new Error("O Gemini retornou uma resposta inválida.");
+  }
+
+  const errorObject = isRecord(payload) && isRecord(payload["error"]) ? payload["error"] : null;
+  const providerMessage = errorObject ? cleanText(errorObject["message"], 400) : null;
+  if (response.status === 401 || response.status === 403) {
+    throw new Error("A chave GEMINI_API_KEY foi recusada. Confira se a chave está ativa e se pertence ao projeto correto no Google AI Studio.");
+  }
+  if (response.status === 429) {
+    const detail = (providerMessage ?? "").toLowerCase();
+    if (detail.includes("billing") || detail.includes("paid tier") || detail.includes("not available on the free")) {
+      throw new Error("A pesquisa do Gemini exige que este projeto tenha acesso ao grounding do Google Search. Confira o nível de uso e o faturamento do projeto no Google AI Studio. Detalhe: " + providerMessage);
+    }
+    if (detail.includes("per_day") || detail.includes("per day") || detail.includes("requests per day") || detail.includes("daily")) {
+      throw new Error("A cota diária de pesquisa do Gemini foi atingida. Confira os limites ativos no Google AI Studio; a quota diária é por projeto, não por chave. Detalhe: " + providerMessage);
+    }
+    if (detail.includes("per minute") || detail.includes("per_minute") || detail.includes("rpm") || detail.includes("tokens per minute")) {
+      throw new Error("O limite por minuto da API Gemini foi atingido. Reduza a frequência das pesquisas e confira os limites ativos no Google AI Studio. Detalhe: " + providerMessage);
+    }
+    throw new Error("A API Gemini recusou a pesquisa por cota ou limite de uso. Confira o projeto, o nível de uso e os limites ativos no Google AI Studio. Detalhe: " + (providerMessage ?? "HTTP 429 RESOURCE_EXHAUSTED"));
+  }
+  if (response.status === 402) {
+    throw new Error("A API do Gemini não aceitou a solicitação por cobrança. Confira o faturamento do Google AI.");
+  }
+  if (!response.ok) {
+    throw new Error("O Gemini respondeu com erro HTTP " + String(response.status) + ". " + (providerMessage ?? "Confira a configuração da API e tente novamente."));
+  }
   if (!isRecord(payload)) throw new Error("O Gemini retornou uma resposta inválida.");
   const result = readInteractionText(payload);
   return { value: extractJson(result.text), sources: result.sources };
@@ -154,14 +183,14 @@ export type GeminiSearchResult = { leads: GeminiProspect[]; sourceCount: number;
 
 export async function searchGeminiProspects(apiKey: string, requestedCity: City, focus: string): Promise<GeminiSearchResult> {
   const prompt = [
-    "Act as one careful local-business research agent. Use Google Search and Google Maps tools to find real businesses in:",
+    "Act as one careful local-business research agent. Use Google Search to find real businesses in:",
     requestedCity + ", Sao Paulo, Brazil.",
     "Research focus provided by the user: " + focus + ". Translate this focus into English if needed before searching.",
     "Find up to " + String(MAX_PROSPECTS) + " distinct small businesses that are plausible prospects for a professional website or digital menu.",
-    "Keep a business only if available Google-grounded evidence indicates it lacks an official website OR lacks a publicly identified digital menu URL.",
-    "Use English for search instructions and output because Google Maps grounding currently supports English. Preserve exact business names, addresses, and phone numbers as listed.",
+    "Keep a business only if available Google Search evidence indicates it lacks an official website OR lacks a publicly identified digital menu URL.",
+    "Use English for search instructions and output. Preserve exact business names, addresses, and phone numbers as listed in the sources.",
     "Do not invent businesses, addresses, phone numbers, websites, menu links, coordinates, Place IDs, or source URLs. Use null for unknown fields.",
-    "For google_maps_url, use the exact place-citation URL from Google Maps grounding. For source_url, use an exact URL citation from Google Search. Exclude a business if you cannot provide a verifiable source URL.",
+    "For source_url, use an exact URL citation returned by Google Search. A google_maps_url must be null unless it is independently present in an actual citation. Exclude a business if you cannot provide a verifiable source URL.",
     "The requested city must be the actual city. Do not mislabel neighboring towns as " + requestedCity + ". Return only a JSON object with a top-level businesses array and no markdown.",
     "Match this exact JSON schema: " + JSON.stringify(PROSPECT_SCHEMA),
   ].join("\n");

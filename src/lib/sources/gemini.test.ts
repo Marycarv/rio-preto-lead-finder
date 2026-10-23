@@ -27,9 +27,9 @@ function responseWithGroundedBusinesses(
   });
 }
 
-describe("Gemini Google Search and Maps research", () => {
-  it("uses one Gemini interaction with both Google tools and imports only cited prospects", async () => {
-    const mapUrl = "https://maps.google.com/?cid=123456";
+describe("Gemini Google Search research", () => {
+  it("uses one Gemini interaction with Google Search and imports only cited prospects", async () => {
+    const sourceUrl = "https://search.example.com/padaria-sao-bento";
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) =>
       responseWithGroundedBusinesses([
         {
@@ -42,8 +42,8 @@ describe("Gemini Google Search and Maps research", () => {
           menu_url: null,
           latitude: -20.82,
           longitude: -49.52,
-          google_maps_url: mapUrl,
-          source_url: null,
+          google_maps_url: null,
+          source_url: sourceUrl,
           place_id: "place-123",
           reason: "No official website or menu URL was identified in the grounded sources.",
         },
@@ -57,8 +57,8 @@ describe("Gemini Google Search and Maps research", () => {
           menu_url: null,
           latitude: null,
           longitude: null,
-          google_maps_url: "https://maps.google.com/?cid=fake",
-          source_url: null,
+          google_maps_url: null,
+          source_url: "https://search.example.com/fake-business",
           place_id: "fake-place",
           reason: "No verified citation.",
         },
@@ -72,13 +72,13 @@ describe("Gemini Google Search and Maps research", () => {
           menu_url: "https://example.com/menu",
           latitude: null,
           longitude: null,
-          google_maps_url: mapUrl,
-          source_url: null,
+          google_maps_url: null,
+          source_url: sourceUrl,
           place_id: "full-place",
           reason: null,
         },
       ], [
-        { type: "place_citation", name: "Padaria São Bento", url: mapUrl },
+        { type: "url_citation", title: "Padaria São Bento - directory", url: sourceUrl },
       ]),
     );
     vi.stubGlobal("fetch", fetchMock);
@@ -100,9 +100,9 @@ describe("Gemini Google Search and Maps research", () => {
       lat: -20.82,
       lon: -49.52,
     });
-    expect(result.leads[0]?.source_id).toMatch(/^gemini:maps:/);
-    expect(result.leads[0]?.notes).toContain("Google Maps");
-    expect(result.leads[0]?.notes).toContain(mapUrl);
+    expect(result.leads[0]?.source_id).toMatch(/^gemini:web:/);
+    expect(result.leads[0]?.notes).toContain("Google Search");
+    expect(result.leads[0]?.notes).toContain(sourceUrl);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     const [url, init] = fetchMock.mock.calls[0] ?? [];
@@ -110,9 +110,9 @@ describe("Gemini Google Search and Maps research", () => {
     expect(String(url)).not.toContain("secret-gemini-key");
     expect(new Headers(init?.headers).get("x-goog-api-key")).toBe("secret-gemini-key");
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gemini-3.8-flash");
+    expect(body["model"]).toBe("gemini-2.5-flash");
     expect(body["store"]).toBe(false);
-    expect(body["tools"]).toEqual([{ type: "google_search" }, { type: "google_maps" }]);
+    expect(body["tools"]).toEqual([{ type: "google_search" }]);
     expect(body["response_format"]).toBeUndefined();
   });
 
@@ -154,13 +154,24 @@ describe("Gemini Google Search and Maps research", () => {
     });
     const [, init] = fetchMock.mock.calls[0] ?? [];
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
-    expect(body["model"]).toBe("gemini-3.8-flash");
+    expect(body["model"]).toBe("gemini-2.5-flash");
     expect(body["tools"]).toBeUndefined();
     expect(body["response_format"]).toMatchObject({ type: "text", mime_type: "application/json" });
   });
 
-  it("surfaces a clear message for Gemini API rate limits", async () => {
+  it("explains when the Google Search daily quota is exhausted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 429,
+        status: "RESOURCE_EXHAUSTED",
+        message: "Quota exceeded for requests per day.",
+      },
+    }), { status: 429, headers: { "content-type": "application/json" } })));
+    await expect(searchGeminiProspects("server-key", "Mirassol", "cafes")).rejects.toThrow("cota diária de pesquisa");
+  });
+
+  it("returns an actionable quota message when a 429 response body is not JSON", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limit", { status: 429 })));
-    await expect(searchGeminiProspects("server-key", "Mirassol", "cafes")).rejects.toThrow("limite de solicitações");
+    await expect(searchGeminiProspects("server-key", "Mirassol", "cafes")).rejects.toThrow("cota ou limite de uso");
   });
 });

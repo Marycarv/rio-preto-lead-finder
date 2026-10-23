@@ -4,7 +4,7 @@ Aplicativo de prospecção assistida para encontrar negócios locais que podem p
 
 ## Pesquisa com Gemini
 
-A busca usa uma única integração do Gemini API, com Google Search e Google Maps grounding habilitados na mesma interação. O Gemini pesquisa a cidade e o tema escolhido, retorna negócios com fontes verificáveis e o aplicativo mostra os links de referência. A busca retorna até 10 oportunidades por vez; não promete listar todos os negócios.
+A busca usa uma única integração do Gemini API (`gemini-2.5-flash`) com Google Search grounding. Não depende do Google Maps grounding, que tem requisitos de quota distintos. O Gemini pesquisa a cidade e o tema escolhido, retorna negócios com fontes verificáveis e o aplicativo mostra os links de referência. A busca retorna até 10 oportunidades por vez; não promete listar todos os negócios.
 
 O mesmo Gemini gera o resumo, a pontuação e a sugestão de mensagem comercial. Toda mensagem continua sujeita à aprovação manual. O aplicativo não envia mensagens automaticamente.
 
@@ -12,7 +12,7 @@ O mesmo Gemini gera o resumo, a pontuação e a sugestão de mensagem comercial.
 
 No Lovable Cloud, adicione a variável secreta de servidor `GEMINI_API_KEY`. Obtenha uma chave no [Google AI Studio](https://aistudio.google.com/apikey). Não adicione essa chave ao código nem a exponha no navegador.
 
-A API pode cobrar pelo uso de Google Search/Google Maps grounding depois da franquia da conta. Confira [os preços oficiais do Gemini](https://ai.google.dev/gemini-api/docs/pricing) e o consumo antes de pesquisar repetidamente.
+A tabela oficial indica Google Search grounding gratuito até 500 consultas por dia no `gemini-2.5-flash`, com limites aplicados por projeto; a disponibilidade real depende da conta e da cota ativa. Consulte os [limites do Gemini](https://ai.google.dev/gemini-api/docs/rate-limits) e [preços oficiais](https://ai.google.dev/gemini-api/docs/pricing) antes de aumentar o volume.
 
 ## Desenvolvimento
 
