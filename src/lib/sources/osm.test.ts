@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeOsmElements } from "@/lib/sources/osm";
+import { normalizeOsmElements, splitOsmBounds } from "@/lib/sources/osm";
 
 describe("OpenStreetMap lead normalization", () => {
   it("uses stable source IDs and removes duplicate elements", () => {
@@ -46,5 +46,18 @@ describe("OpenStreetMap lead normalization", () => {
       lon: null,
       city: "Mirassol",
     });
+  });
+});
+
+
+describe("verified municipal query subdivision", () => {
+  it("splits a verified extent into four tiles without inventing coordinates", () => {
+    const bounds = { south: -21, west: -50, north: -20, east: -49 };
+    expect(splitOsmBounds(bounds)).toEqual([
+      { south: -21, west: -50, north: -20.5, east: -49.5 },
+      { south: -21, west: -49.5, north: -20.5, east: -49 },
+      { south: -20.5, west: -50, north: -20, east: -49.5 },
+      { south: -20.5, west: -49.5, north: -20, east: -49 },
+    ]);
   });
 });
