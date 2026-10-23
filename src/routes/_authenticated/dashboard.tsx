@@ -203,7 +203,7 @@ function Dashboard() {
             {CITIES.map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <Button onClick={doImport} disabled={importing}>{importing ? "Buscando (até 1 min)..." : "Buscar leads"}</Button>
+        <Button onClick={doImport} disabled={importing}>{importing ? "Buscando no OpenStreetMap..." : "Buscar leads"}</Button>
         <p className="text-xs text-muted-foreground">"Sem site" significa que nenhum site foi identificado na fonte — confirme antes de abordar.</p>
       </section>
 
