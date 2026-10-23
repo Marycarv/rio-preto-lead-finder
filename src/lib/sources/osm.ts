@@ -37,12 +37,23 @@ area["name"="${city}"]["boundary"="administrative"]["admin_level"="8"]->.c;
   nwr(area.c)["name"]["office"](${BBOX});
 );
 out center tags 600;`;
-  const res = await fetch("https://overpass-api.de/api/interpreter", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "advexon-prospect/1.0" },
-    body: "data=" + encodeURIComponent(q),
-  });
-  if (!res.ok) throw new Error(`OpenStreetMap indisponível (${res.status}). Tente novamente em alguns minutos.`);
+  const mirrors = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+  ];
+  let res: Response | null = null;
+  for (const url of mirrors) {
+    try {
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded", "User-Agent": "advexon-prospect/1.0" },
+        body: "data=" + encodeURIComponent(q),
+      });
+      if (r.ok && (r.headers.get("content-type") ?? "").includes("json")) { res = r; break; }
+    } catch {}
+  }
+  if (!res) throw new Error("Servidores do OpenStreetMap ocupados no momento. Tente novamente em alguns minutos.");
   const json = (await res.json()) as { elements: Array<any> };
   return json.elements
     .filter((e) => e.tags?.name)
