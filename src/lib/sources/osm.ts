@@ -1,3 +1,5 @@
+import { CITIES } from "./cities";
+
 // OpenStreetMap (Overpass) lead source. Server-only usage.
 export type RawLead = {
   source: string;
@@ -15,15 +17,7 @@ export type RawLead = {
   lon: number | null;
 };
 
-export const CITIES = [
-  "São José do Rio Preto",
-  "Mirassol",
-  "Bady Bassitt",
-  "Cedral",
-  "Guapiaçu",
-  "Ipiguá",
-] as const;
-
+export { CITIES };
 export type City = (typeof CITIES)[number];
 
 type RecordValue = Record<string, unknown>;

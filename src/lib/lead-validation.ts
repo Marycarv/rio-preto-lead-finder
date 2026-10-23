@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { CITIES } from "@/lib/sources/osm";
+import { CITIES } from "@/lib/sources/cities";
 
 export const importInputSchema = z.object({
   city: z.enum(CITIES),
@@ -7,6 +7,10 @@ export const importInputSchema = z.object({
 
 export const analyzeInputSchema = z.object({
   id: z.string().uuid(),
+}).strict();
+
+export const importStatusInputSchema = z.object({
+  taskToken: z.string().min(20).max(2048),
 }).strict();
 
 export const leadAnalysisSchema = z.object({
