@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CITIES } from "@/lib/sources/cities";
 import {
   createOutscraperTaskToken,
+  getOutscraperSearchResults,
   normalizeOutscraperResults,
+  startOutscraperSearch,
   verifyOutscraperTaskToken,
 } from "@/lib/sources/outscraper";
 
@@ -119,6 +121,76 @@ describe("Outscraper Google Maps normalization", () => {
       { name: "Empresa externa", city: "Bebedouro", country_code: "BR", site: null },
     ], "Mirassol");
     expect(leads).toEqual([]);
+  });
+});
+
+describe("Outscraper API workflow", () => {
+  it("starts a bounded async Google Maps search without exposing the key in the URL", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      id: "request_12345678",
+      status: "Pending",
+      results_location: "https://api.outscraper.cloud/requests/request_12345678",
+    }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await startOutscraperSearch("server-only-key", "Mirassol");
+    expect(result).toEqual({ status: "processing", requestId: "request_12345678" });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const [input, init] = fetchMock.mock.calls[0] ?? [];
+    expect(String(input)).toBe("https://api.outscraper.cloud/google-maps-search");
+    expect(String(input)).not.toContain("server-only-key");
+    expect(new Headers(init?.headers).get("X-API-KEY")).toBe("server-only-key");
+
+    const body = JSON.parse(String(init?.body)) as {
+      query: string[];
+      limit: number;
+      totalLimit: number;
+      dropDuplicates: boolean;
+      async: boolean;
+      region: string;
+    };
+    expect(body.query.length).toBeGreaterThan(10);
+    expect(body.query.every((query) => query.includes("Mirassol, São Paulo, Brasil"))).toBe(true);
+    expect(body.limit).toBe(100);
+    expect(body.totalLimit).toBe(300);
+    expect(body.dropDuplicates).toBe(true);
+    expect(body.async).toBe(true);
+    expect(body.region).toBe("BR");
+  });
+
+  it("returns processing until the async results endpoint reports success", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: "Pending" }), {
+      status: 202,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOutscraperSearchResults("server-only-key", "request_12345678")).resolves.toEqual({
+      status: "processing",
+    });
+    expect(String(fetchMock.mock.calls[0]?.[0])).toBe("https://api.outscraper.cloud/requests/request_12345678");
+  });
+
+  it("reads completed results from the provider response", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      status: "Success",
+      data: [[{ name: "Café Centro", city: "Mirassol", country_code: "BR", place_id: "place-123", site: null }]],
+    }), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await getOutscraperSearchResults("server-only-key", "request_12345678");
+    expect(response.status).toBe("complete");
+    if (response.status === "complete") {
+      expect(normalizeOutscraperResults(response.data, "Mirassol")).toMatchObject([
+        { name: "Café Centro", source_id: "google:place-123", has_website: false },
+      ]);
+    }
   });
 });
 
