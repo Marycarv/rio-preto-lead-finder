@@ -1,4 +1,3 @@
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 import { CITIES, type City } from "./cities";
 
 export type ProspectLead = {
@@ -137,10 +136,17 @@ function collectPlaceRecords(value: unknown, out: RecordValue[] = []): RecordVal
 }
 
 function stableFallbackId(name: string, city: string, address: string | null): string {
-  return createHash("sha256")
-    .update([normalizePlaceName(name), normalizePlaceName(city), normalizePlaceName(address ?? "")].join("|"))
-    .digest("hex")
-    .slice(0, 32);
+  const input = [normalizePlaceName(name), normalizePlaceName(city), normalizePlaceName(address ?? "")].join("|");
+  let first = 2166136261;
+  let second = 2246822519;
+  for (let index = 0; index < input.length; index += 1) {
+    const code = input.charCodeAt(index);
+    first = Math.imul(first ^ code, 16777619) >>> 0;
+    second = Math.imul(second ^ code, 3266489917) >>> 0;
+  }
+  const a = first.toString(16).padStart(8, "0");
+  const b = second.toString(16).padStart(8, "0");
+  return (a + b + a + b).slice(0, 32);
 }
 
 /**
@@ -277,28 +283,52 @@ export async function getOutscraperSearchResults(apiKey: string, requestId: stri
   return { status: "complete", data: payload["data"] };
 }
 
-export function createOutscraperTaskToken(
+function encodeBase64Url(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+}
+
+function decodeBase64Url(value: string): Uint8Array {
+  const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
+  const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+  const binary = atob(padded);
+  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+}
+
+async function importHmacKey(secret: string): Promise<CryptoKey> {
+  return globalThis.crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(secret),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign", "verify"],
+  );
+}
+
+export async function createOutscraperTaskToken(
   requestId: string,
   userId: string,
   city: City,
   secret: string,
-): string {
+): Promise<string> {
   if (!REQUEST_ID_PATTERN.test(requestId)) throw new Error("O Outscraper retornou um identificador de busca inválido.");
-  const payload = Buffer.from(JSON.stringify({
+  const payload = encodeBase64Url(new TextEncoder().encode(JSON.stringify({
     requestId,
     userId,
     city,
     createdAt: Date.now(),
-  })).toString("base64url");
-  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
-  return payload + "." + signature;
+  })));
+  const key = await importHmacKey(secret);
+  const signature = await globalThis.crypto.subtle.sign("HMAC", key, new TextEncoder().encode(payload));
+  return payload + "." + encodeBase64Url(new Uint8Array(signature));
 }
 
-export function verifyOutscraperTaskToken(
+export async function verifyOutscraperTaskToken(
   token: string,
   userId: string,
   secret: string,
-): OutscraperTaskClaim | null {
+): Promise<OutscraperTaskClaim | null> {
   if (token.length > 2048) return null;
   const parts = token.split(".");
   if (parts.length !== 2) return null;
@@ -306,12 +336,16 @@ export function verifyOutscraperTaskToken(
   if (!payload || !suppliedSignature) return null;
 
   try {
-    const expectedSignature = createHmac("sha256", secret).update(payload).digest("base64url");
-    const expectedBytes = Buffer.from(expectedSignature);
-    const suppliedBytes = Buffer.from(suppliedSignature);
-    if (expectedBytes.length !== suppliedBytes.length || !timingSafeEqual(expectedBytes, suppliedBytes)) return null;
+    const key = await importHmacKey(secret);
+    const isValid = await globalThis.crypto.subtle.verify(
+      "HMAC",
+      key,
+      decodeBase64Url(suppliedSignature),
+      new TextEncoder().encode(payload),
+    );
+    if (!isValid) return null;
 
-    const raw = JSON.parse(Buffer.from(payload, "base64url").toString("utf8")) as unknown;
+    const raw: unknown = JSON.parse(new TextDecoder().decode(decodeBase64Url(payload)));
     if (!isRecord(raw)) return null;
     if (raw["userId"] !== userId) return null;
     if (typeof raw["requestId"] !== "string" || !REQUEST_ID_PATTERN.test(raw["requestId"])) return null;
