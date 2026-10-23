@@ -149,7 +149,13 @@ function Dashboard() {
 
       toast.info("A busca ainda está processando no Google Maps. Clique em “Continuar busca pendente” para consultar o mesmo trabalho sem iniciar uma nova cobrança.");
     } catch (e) {
-      toast.error((e as Error).message);
+      const message = (e as Error).message;
+      // Keep the token for transient network errors, but release dead tasks so
+      // the user can start a fresh search after a terminal provider/config error.
+      if (/expirou|falhou no Outscraper|não conseguiu iniciar a busca|sem créditos|chave OUTSCRAPER_API_KEY|não retornou uma lista/i.test(message)) {
+        setPendingImportToken(null);
+      }
+      toast.error(message);
     } finally {
       setImporting(false);
       setImportStage("");
