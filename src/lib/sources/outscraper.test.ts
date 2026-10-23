@@ -126,25 +126,25 @@ describe("Outscraper asynchronous task token", () => {
   const secret = "test-outsraper-api-key";
   const userId = "user-a";
 
-  it("signs the task with city and user ownership", () => {
-    const token = createOutscraperTaskToken("request_12345678", userId, CITIES[1], secret);
-    expect(verifyOutscraperTaskToken(token, userId, secret)).toMatchObject({
+  it("signs the task with city and user ownership", async () => {
+    const token = await createOutscraperTaskToken("request_12345678", userId, CITIES[1], secret);
+    expect(await verifyOutscraperTaskToken(token, userId, secret)).toMatchObject({
       requestId: "request_12345678",
       userId,
       city: "Mirassol",
     });
-    expect(verifyOutscraperTaskToken(token, "another-user", secret)).toBeNull();
-    expect(verifyOutscraperTaskToken(token, userId, "wrong-secret")).toBeNull();
+    expect(await verifyOutscraperTaskToken(token, "another-user", secret)).toBeNull();
+    expect(await verifyOutscraperTaskToken(token, userId, "wrong-secret")).toBeNull();
   });
 
-  it("rejects tampered and expired task tokens", () => {
-    const token = createOutscraperTaskToken("request_12345678", userId, CITIES[0], secret);
-    expect(verifyOutscraperTaskToken(token + "x", userId, secret)).toBeNull();
+  it("rejects tampered and expired task tokens", async () => {
+    const token = await createOutscraperTaskToken("request_12345678", userId, CITIES[0], secret);
+    expect(await verifyOutscraperTaskToken(token + "x", userId, secret)).toBeNull();
 
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-10-23T12:00:00.000Z"));
-    const expiring = createOutscraperTaskToken("request_abcdefgh", userId, CITIES[0], secret);
+    const expiring = await createOutscraperTaskToken("request_abcdefgh", userId, CITIES[0], secret);
     vi.setSystemTime(new Date("2026-10-23T16:00:01.000Z"));
-    expect(verifyOutscraperTaskToken(expiring, userId, secret)).toBeNull();
+    expect(await verifyOutscraperTaskToken(expiring, userId, secret)).toBeNull();
   });
 });
