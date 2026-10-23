@@ -16,6 +16,26 @@ In the Supabase Dashboard, configure the project's **Site URL** and **Redirect U
 
 Allow the full callback URL for each approved origin (for example `https://your-real-domain.example/auth?mode=reset`) and keep the base app URL configured as the Site URL. Replace the example host with the actual domain; do not allow arbitrary origins. Configure the Supabase email template/provider so recovery links are delivered. The app does not verify external e-mail delivery or provider configuration.
 
+## Google Maps lead source (Outscraper)
+
+The default import source is now Outscraper's asynchronous Google Maps Search API. The previous OpenStreetMap module remains in the repository for reference/tests, but the dashboard no longer uses it to import leads.
+
+### Required secret
+
+Configure `OUTSCRAPER_API_KEY` in the Lovable Cloud server-side Secrets/environment settings. Create and manage the key in the Outscraper account: https://app.outscraper.com/
+
+- Keep the key on the server. Do not name it `VITE_OUTSCRAPER_API_KEY`, expose it in the browser, or commit it to Git.
+- If the secret is missing or rejected, import fails with a configuration message rather than falling back to OpenStreetMap.
+- The import launches an asynchronous provider task and polls it; the signed task token is tied to the authenticated user and expires after four hours. Resuming a task reuses the same provider request instead of creating a second paid job.
+- Each city request searches a set of small-business categories and caps returned places at 300. The mapper only keeps business listings with no website or no identified menu link, then deduplicates by provider place ID when available.
+- The provider currently advertises the first 500 places free and $3 per 1,000 places between 501 and 100,000. This is the provider's published pricing, not a guarantee of the account's remaining free quota or final bill. Check Outscraper's current pricing and account usage before repeated searches: https://outscraper.com/pricing/
+- A missing `menu_link` means the provider did not identify a menu URL; it does not prove that the business has no menu. Verify the listing before outreach.
+- The application still requires manual message approval and does not automatically send outreach messages.
+
+### Data use and privacy
+
+This integration uses a third-party provider returning structured data sourced from Google Maps; it is not Google's official Places API. Review the provider's terms and data-use permissions for the intended prospecting workflow, and assess LGPD obligations, purpose, retention, and outreach opt-out handling before commercial use. Google's official Places API has separate caching/storage restrictions and should not be substituted into this persistent lead database without redesigning data retention: https://developers.google.com/maps/documentation/places/web-service/policies
+
 ## OpenStreetMap availability and data quality
 
 The import resolves each supported city through Nominatim and checks the administrative relation's name, country, and São Paulo state before using its derived Overpass area. If the city boundary cannot be verified, import stops rather than using a guessed bounding box. Public Nominatim/Overpass services may rate-limit or be unavailable; failures are surfaced and should be retried later. A saturated result limit is reported as incomplete rather than silently treated as a complete dataset.
