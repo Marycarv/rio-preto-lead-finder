@@ -126,7 +126,7 @@ describe("Outscraper Google Maps normalization", () => {
 
 describe("Outscraper API workflow", () => {
   it("starts a bounded async Google Maps search without exposing the key in the URL", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       id: "request_12345678",
       status: "Pending",
       results_location: "https://api.outscraper.cloud/requests/request_12345678",
@@ -162,7 +162,7 @@ describe("Outscraper API workflow", () => {
   });
 
   it("returns processing until the async results endpoint reports success", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ status: "Pending" }), {
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({ status: "Pending" }), {
       status: 202,
       headers: { "content-type": "application/json" },
     }));
@@ -175,7 +175,7 @@ describe("Outscraper API workflow", () => {
   });
 
   it("reads completed results from the provider response", async () => {
-    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+    const fetchMock = vi.fn(async (_input: RequestInfo | URL, _init?: RequestInit) => new Response(JSON.stringify({
       status: "Success",
       data: [[{ name: "Café Centro", city: "Mirassol", country_code: "BR", place_id: "place-123", site: null }]],
     }), {
