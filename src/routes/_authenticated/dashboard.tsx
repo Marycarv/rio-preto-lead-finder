@@ -34,7 +34,9 @@ type Lead = {
 type LeadResearchNotes = {
   sourceLabel: string | null;
   googleMapsUrl: string | null;
+  googleMapsName: string | null;
   webSourceUrl: string | null;
+  webSourceName: string | null;
   menuUrl: string | null;
   evidence: string | null;
 };
@@ -55,7 +57,9 @@ function parseLeadResearchNotes(value: string | null): LeadResearchNotes | null 
     return {
       sourceLabel: typeof row["sourceLabel"] === "string" ? row["sourceLabel"] : null,
       googleMapsUrl: safeUrl(row["googleMapsUrl"]),
+      googleMapsName: typeof row["googleMapsName"] === "string" ? row["googleMapsName"] : null,
       webSourceUrl: safeUrl(row["webSourceUrl"]),
+      webSourceName: typeof row["webSourceName"] === "string" ? row["webSourceName"] : null,
       menuUrl: safeUrl(row["menuUrl"]),
       evidence: typeof row["evidence"] === "string" ? row["evidence"] : null,
     };
@@ -325,10 +329,10 @@ function Dashboard() {
                     <p className="font-semibold">Fontes da pesquisa Gemini</p>
                     <div className="flex flex-wrap gap-3">
                       {sources.googleMapsUrl && (
-                        <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>
+                        <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>{sources.googleMapsName ? <span className="text-xs text-muted-foreground">{sources.googleMapsName}</span> : null}
                       )}
                       {sources.webSourceUrl && (
-                        <a href={sources.webSourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Fonte web</a>
+                        <a href={sources.webSourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{sources.webSourceName ?? "Fonte web"}</a>
                       )}
                       {sources.menuUrl && (
                         <a href={sources.menuUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Cardápio online</a>
