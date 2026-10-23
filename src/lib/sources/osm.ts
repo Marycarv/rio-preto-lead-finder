@@ -190,16 +190,16 @@ async function resolveCityArea(city: City): Promise<number> {
 
     const address = candidate.address;
     if (!address) continue;
-    const country = normalizePlaceName(typeof address.country === "string" ? address.country : "");
-    const state = normalizePlaceName(typeof address.state === "string" ? address.state : "");
-    const adminLevel = String(candidate.extratags?.admin_level ?? "");
+    const country = normalizePlaceName(typeof address["country"] === "string" ? address["country"] : "");
+    const state = normalizePlaceName(typeof address["state"] === "string" ? address["state"] : "");
+    const adminLevel = String(candidate.extratags?.["admin_level"] ?? "");
     const names = [
       candidate.name,
-      address.city,
-      address.town,
-      address.village,
-      address.municipality,
-      address.hamlet,
+      address["city"],
+      address["town"],
+      address["village"],
+      address["municipality"],
+      address["hamlet"],
     ].filter((value): value is string => typeof value === "string");
 
     if (country !== "brasil" && country !== "brazil") continue;
@@ -301,24 +301,24 @@ export function normalizeOsmElements(elements: unknown[], city: City): RawLead[]
     if (!isRecord(element.tags)) continue;
 
     const tags = element.tags;
-    const name = cleanTag(tags.name, 180);
+    const name = cleanTag(tags["name"], 180);
     if (!name) continue;
 
     const sourceId = String(element.type) + "/" + String(element.id);
-    const website = cleanTag(tags.website ?? tags["contact:website"] ?? tags.url, 500);
-    const menu = cleanTag(tags["website:menu"] ?? tags.menu_url, 500);
+    const website = cleanTag(tags["website"] ?? tags["contact:website"] ?? tags["url"], 500);
+    const menu = cleanTag(tags["website:menu"] ?? tags["menu_url"], 500);
     const street = cleanTag(tags["addr:street"], 120);
     const houseNumber = cleanTag(tags["addr:housenumber"], 40);
     const suburb = cleanTag(tags["addr:suburb"], 100);
     const address = [street, houseNumber, suburb].filter((value): value is string => value !== null).join(", ");
     const center = isRecord(element.center) ? element.center : {};
-    const lat = finiteCoordinate(element.lat, -90, 90) ?? finiteCoordinate(center.lat, -90, 90);
-    const lon = finiteCoordinate(element.lon, -180, 180) ?? finiteCoordinate(center.lon, -180, 180);
+    const lat = finiteCoordinate(element.lat, -90, 90) ?? finiteCoordinate(center["lat"], -90, 90);
+    const lon = finiteCoordinate(element.lon, -180, 180) ?? finiteCoordinate(center["lon"], -180, 180);
     const category =
-      cleanTag(tags.amenity, 100) ??
-      cleanTag(tags.shop, 100) ??
-      cleanTag(tags.craft, 100) ??
-      cleanTag(tags.office, 100);
+      cleanTag(tags["amenity"], 100) ??
+      cleanTag(tags["shop"], 100) ??
+      cleanTag(tags["craft"], 100) ??
+      cleanTag(tags["office"], 100);
 
     normalized.set(sourceId, {
       source: "openstreetmap",
@@ -327,7 +327,7 @@ export function normalizeOsmElements(elements: unknown[], city: City): RawLead[]
       category,
       city,
       address: address || null,
-      phone: cleanTag(tags.phone ?? tags["contact:phone"], 80),
+      phone: cleanTag(tags["phone"] ?? tags["contact:phone"], 80),
       whatsapp: cleanTag(tags["contact:whatsapp"], 80),
       website,
       has_website: website !== null,
