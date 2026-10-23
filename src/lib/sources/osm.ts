@@ -56,6 +56,14 @@ type CityArea = {
 type RequestBudget = {
   used: number;
 };
+
+class OverpassQueryTimeoutError extends Error {
+  constructor() {
+    super("A consulta excedeu o tempo limite do servidor Overpass.");
+    this.name = "OverpassQueryTimeoutError";
+  }
+}
+
 type OsmElement = {
   type?: unknown;
   id?: unknown;
@@ -70,7 +78,10 @@ const MAX_RESULTS_PER_GROUP = 2500;
 const MAX_SUBDIVISION_DEPTH = 2;
 const MAX_OVERPASS_REQUESTS_PER_CITY = 40;
 const AREA_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const OVERPASS_TIMEOUT_MS = 12_000;
+// The Overpass query asks the server for up to 20 seconds. Leave a small
+// transport margin so the client does not abort the request prematurely.
+const OVERPASS_QUERY_TIMEOUT_SECONDS = 20;
+const OVERPASS_TIMEOUT_MS = (OVERPASS_QUERY_TIMEOUT_SECONDS + 5) * 1000;
 const NOMINATIM_TIMEOUT_MS = 8_000;
 const OVERPASS_ENDPOINTS = [
   "https://overpass-api.de/api/interpreter",
@@ -318,7 +329,12 @@ async function fetchOverpass(query: string, budget: RequestBudget): Promise<Over
         lastFailure = "rate";
         continue;
       }
-      if ([500, 502, 503, 504].includes(response.status)) {
+      if (response.status === 504) {
+        // Repeating the same expensive full-city query is unlikely to help.
+        // The caller can safely retry on smaller, validated bounding boxes.
+        throw new OverpassQueryTimeoutError();
+      }
+      if ([500, 502, 503].includes(response.status)) {
         lastFailure = "server";
         continue;
       }
@@ -345,7 +361,12 @@ async function fetchOverpass(query: string, budget: RequestBudget): Promise<Over
       nextOverpassEndpoint = (endpointIndex + 1) % OVERPASS_ENDPOINTS.length;
       return payload;
     } catch (error) {
+      if (error instanceof OverpassQueryTimeoutError) throw error;
       if (error instanceof Error && error.message === "O serviço Overpass recusou a consulta.") throw error;
+      if (error instanceof Error && error.name === "TimeoutError") {
+        // Do not send the same expensive full-area query to another mirror.
+        throw new OverpassQueryTimeoutError();
+      }
       lastFailure = "network";
     }
   }
@@ -426,30 +447,46 @@ async function fetchGroupInBounds(
   budget: RequestBudget,
 ): Promise<unknown[]> {
   const query =
-    "[out:json][timeout:20][maxsize:67108864];\n" +
+    "[out:json][timeout:" + String(OVERPASS_QUERY_TIMEOUT_SECONDS) + "][maxsize:67108864];\n" +
     "area(" + String(area.areaId) + ")->.city;\n" +
     "(nwr(area.city)[\"name\"]" + selector +
     (bounds === null ? "" : formatOverpassBounds(bounds)) + ";);\n" +
     "out center tags " + String(MAX_RESULTS_PER_GROUP) + ";";
 
-  const payload = await fetchOverpass(query, budget);
+  let payload: OverpassPayload;
+  try {
+    payload = await fetchOverpass(query, budget);
+  } catch (error) {
+    if (!(error instanceof OverpassQueryTimeoutError)) throw error;
+    // If the whole municipal query is slow, retry smaller verified tiles.
+    return fetchSubdividedGroup(area, selector, bounds, depth, budget, "tempo limite");
+  }
   if (payload.elements.length < MAX_RESULTS_PER_GROUP) return payload.elements;
 
+  return fetchSubdividedGroup(area, selector, bounds, depth, budget, "limite de resultados");
+}
+
+async function fetchSubdividedGroup(
+  area: CityArea,
+  selector: string,
+  bounds: OsmBounds | null,
+  depth: number,
+  budget: RequestBudget,
+  reason: "tempo limite" | "limite de resultados",
+): Promise<unknown[]> {
   if (bounds === null) {
     throw new Error(
-      "A busca atingiu o limite de " + String(MAX_RESULTS_PER_GROUP) +
-      " resultados, mas a fonte não forneceu uma caixa geográfica validada para subdividir a consulta. Nenhum resultado parcial foi salvo.",
+      "A consulta atingiu o " + reason + ", mas o OpenStreetMap não forneceu limites geográficos validados para subdividir a busca. Nenhum resultado parcial foi salvo.",
     );
   }
   if (depth >= MAX_SUBDIVISION_DEPTH) {
     throw new Error(
-      "Uma área de busca continuou acima do limite após subdivisões geográficas seguras. Nenhum resultado parcial foi salvo; reduza a abrangência ou tente novamente mais tarde.",
+      "A busca continuou excedendo o " + reason + " após subdivisões geográficas seguras. Nenhum resultado parcial foi salvo; tente novamente mais tarde.",
     );
   }
 
-  const subdivisions = splitOsmBounds(bounds);
   const results: unknown[] = [];
-  for (const childBounds of subdivisions) {
+  for (const childBounds of splitOsmBounds(bounds)) {
     results.push(...await fetchGroupInBounds(area, selector, childBounds, depth + 1, budget));
   }
   return results;
