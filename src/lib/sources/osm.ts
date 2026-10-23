@@ -15,15 +15,8 @@ export type RawLead = {
   lon: number | null;
 };
 
-export const CITIES = [
-  "São José do Rio Preto",
-  "Mirassol",
-  "Bady Bassitt",
-  "Cedral",
-  "Guapiaçu",
-  "Ipiguá",
-] as const;
-
+import { CITIES } from "./cities";
+export { CITIES } from "./cities";
 export type City = (typeof CITIES)[number];
 
 type RecordValue = Record<string, unknown>;
