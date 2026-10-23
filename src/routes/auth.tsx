@@ -1,5 +1,5 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
@@ -22,11 +22,14 @@ export const Route = createFileRoute("/auth")({
 
 function AuthPage() {
   const nav = useNavigate();
-  const [mode, setMode] = useState<AuthMode>(() =>
-    typeof window !== "undefined" && new URLSearchParams(window.location.search).get("mode") === "reset"
-      ? "reset"
-      : "in",
-  );
+  const [mode, setMode] = useState<AuthMode>("in");
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("mode") === "reset") {
+      setMode("reset");
+    }
+  }, []);
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
