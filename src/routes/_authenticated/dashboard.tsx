@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { importLeads, getLeadImportStatus, analyzeLead } from "@/lib/leads.functions";
+import { importLeads, analyzeLead } from "@/lib/leads.functions";
 import { CITIES } from "@/lib/sources/cities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -28,18 +28,54 @@ type Lead = {
   id: string; name: string; category: string | null; city: string | null; address: string | null;
   phone: string | null; whatsapp: string | null; website: string | null; has_website: boolean; has_menu: boolean;
   source: string; fetched_at: string; ai_score: number | null; ai_summary: string | null; ai_message: string | null;
-  status: string; approved: boolean;
+  status: string; approved: boolean; notes: string | null;
 };
+
+type LeadResearchNotes = {
+  sourceLabel: string | null;
+  googleMapsUrl: string | null;
+  googleMapsName: string | null;
+  webSourceUrl: string | null;
+  webSourceName: string | null;
+  menuUrl: string | null;
+  evidence: string | null;
+};
+
+function parseLeadResearchNotes(value: string | null): LeadResearchNotes | null {
+  if (!value) return null;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return null;
+    const row = parsed as Record<string, unknown>;
+    const safeUrl = (input: unknown) => {
+      if (typeof input !== "string") return null;
+      try {
+        const url = new URL(input);
+        return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+      } catch { return null; }
+    };
+    return {
+      sourceLabel: typeof row["sourceLabel"] === "string" ? row["sourceLabel"] : null,
+      googleMapsUrl: safeUrl(row["googleMapsUrl"]),
+      googleMapsName: typeof row["googleMapsName"] === "string" ? row["googleMapsName"] : null,
+      webSourceUrl: safeUrl(row["webSourceUrl"]),
+      webSourceName: typeof row["webSourceName"] === "string" ? row["webSourceName"] : null,
+      menuUrl: safeUrl(row["menuUrl"]),
+      evidence: typeof row["evidence"] === "string" ? row["evidence"] : null,
+    };
+  } catch {
+    return null;
+  }
+}
 
 function Dashboard() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const runImport = useServerFn(importLeads);
-  const runImportStatus = useServerFn(getLeadImportStatus);
   const runAnalyze = useServerFn(analyzeLead);
   const [city, setCity] = useState<string>(CITIES[0]);
   const [importing, setImporting] = useState(false);
-  const [pendingImportToken, setPendingImportToken] = useState<string | null>(null);
+  const [searchFocus, setSearchFocus] = useState("restaurantes, cafeterias, padarias e negócios locais sem site ou cardápio digital");
   const [importStage, setImportStage] = useState("");
   const [onlyNoSite, setOnlyNoSite] = useState(false);
   const [onlyPhone, setOnlyPhone] = useState(false);
@@ -58,7 +94,7 @@ function Dashboard() {
     queryFn: async () => {
       let query = supabase
         .from("leads")
-        .select("id,name,category,city,address,phone,whatsapp,website,has_website,has_menu,source,fetched_at,ai_score,ai_summary,ai_message,status,approved", { count: "exact" })
+        .select("id,name,category,city,address,phone,whatsapp,website,has_website,has_menu,source,fetched_at,ai_score,ai_summary,ai_message,status,approved,notes", { count: "exact" })
         .order("created_at", { ascending: false })
         .range((page - 1) * pageSize, page * pageSize - 1);
 
@@ -112,50 +148,14 @@ function Dashboard() {
 
   async function doImport() {
     setImporting(true);
+    setImportStage("Gemini pesquisando no Google Search e Google Maps...");
     try {
-      let taskToken = pendingImportToken;
-
-      if (!taskToken) {
-        setImportStage("Iniciando busca no Google Maps...");
-        const started = await runImport({ data: { city } });
-        if (started.status === "complete") {
-          toast.success(`${started.found} oportunidades encontradas em ${city}: ${started.withoutSite} sem site e ${started.withoutMenu} sem cardápio. ${started.inserted} novas salvas.`);
-          await qc.invalidateQueries({ queryKey: ["leads"] });
-          await qc.invalidateQueries({ queryKey: ["lead-stats"] });
-          return;
-        }
-        taskToken = started.taskToken;
-        setPendingImportToken(taskToken);
-      }
-
-      // Outscraper searches run asynchronously, so poll the provider instead of
-      // holding one long-running server request open. Reuse the signed task token
-      // when the user resumes a pending search; never start a duplicate paid job.
-      const maxChecks = 75;
-      for (let attempt = 0; attempt < maxChecks; attempt += 1) {
-        setImportStage(attempt === 0
-          ? "Pesquisando empresas no Google Maps..."
-          : `Google Maps pesquisando... verificação ${attempt + 1}/${maxChecks}`);
-        await new Promise((resolve) => setTimeout(resolve, 4000));
-        const progress = await runImportStatus({ data: { taskToken } });
-        if (progress.status === "processing") continue;
-
-        setPendingImportToken(null);
-        toast.success(`${progress.found} oportunidades encontradas em ${city}: ${progress.withoutSite} sem site e ${progress.withoutMenu} sem cardápio. ${progress.inserted} novas salvas.`);
-        await qc.invalidateQueries({ queryKey: ["leads"] });
-        await qc.invalidateQueries({ queryKey: ["lead-stats"] });
-        return;
-      }
-
-      toast.info("A busca ainda está processando no Google Maps. Clique em “Continuar busca pendente” para consultar o mesmo trabalho sem iniciar uma nova cobrança.");
+      const result = await runImport({ data: { city, query: searchFocus } });
+      toast.success(`${result.found} negócios com fontes encontradas em ${city}; ${result.inserted} novos salvos. ${result.withoutSite} sem site e ${result.withoutMenu} sem cardápio identificado.`);
+      await qc.invalidateQueries({ queryKey: ["leads"] });
+      await qc.invalidateQueries({ queryKey: ["lead-stats"] });
     } catch (e) {
-      const message = (e as Error).message;
-      // Keep the token for transient network errors, but release dead tasks so
-      // the user can start a fresh search after a terminal provider/config error.
-      if (/expirou|falhou no Outscraper|não conseguiu iniciar a busca|sem créditos|chave OUTSCRAPER_API_KEY|não retornou uma lista/i.test(message)) {
-        setPendingImportToken(null);
-      }
-      toast.error(message);
+      toast.error((e as Error).message);
     } finally {
       setImporting(false);
       setImportStage("");
@@ -225,7 +225,7 @@ function Dashboard() {
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand font-display text-lg font-black text-primary-foreground">A</div>
           <div>
             <h1 className="text-xl font-bold">ADVEXON Prospect</h1>
-            <p className="text-sm text-muted-foreground">Rio Preto e região · fonte: Google Maps via Outscraper</p>
+            <p className="text-sm text-muted-foreground">Pesquisa inteligente com Gemini · Google Search + Google Maps</p>
           </div>
         </div>
         <Button variant="outline" onClick={signOut}>Sair</Button>
@@ -242,14 +242,20 @@ function Dashboard() {
 
       <section className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border bg-card p-4">
         <div>
-          <div className="mb-1 text-xs text-muted-foreground">Buscar novos estabelecimentos em</div>
-          <select value={city} disabled={importing || Boolean(pendingImportToken)} onChange={(e) => setCity(e.target.value)} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
+          <div className="mb-1 text-xs text-muted-foreground">Cidade</div>
+          <select value={city} disabled={importing} onChange={(e) => setCity(e.target.value)} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
             {CITIES.map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <Button onClick={doImport} disabled={importing}>{importing ? (importStage || "Buscando no Google Maps...") : pendingImportToken ? "Continuar busca pendente" : "Buscar leads no Google Maps"}</Button>
+        <div className="min-w-[260px] flex-1">
+          <div className="mb-1 text-xs text-muted-foreground">O que o Gemini deve pesquisar?</div>
+          <Input value={searchFocus} disabled={importing} onChange={(e) => setSearchFocus(e.target.value)} placeholder="Ex.: restaurantes sem site ou cardápio" className="w-full" />
+        </div>
+        <Button onClick={doImport} disabled={importing || searchFocus.trim().length < 3}>
+          {importing ? (importStage || "Gemini pesquisando...") : "Pesquisar com Gemini"}
+        </Button>
         <p className="max-w-2xl text-xs text-muted-foreground">
-          Google Maps via Outscraper · até 300 lugares por busca, em várias categorias. A conta divulga 500 lugares iniciais grátis; depois, US$ 3 por 1.000 registros até 100 mil, conforme uso. Sem site e sem cardápio são oportunidades potenciais — confirme os dados antes de abordar.
+          Um único Gemini pesquisa Google Search e Google Maps, verifica fontes e retorna até 10 oportunidades por busca. Os dados podem estar incompletos; confirme cada negócio antes de abordar. O uso da API Google pode gerar cobrança conforme seu plano.
         </p>
       </section>
 
@@ -315,6 +321,30 @@ function Dashboard() {
                 <div><span className="text-muted-foreground">Site:</span> {sel.website ?? "nenhum identificado"}</div>
                 <div className="text-xs text-muted-foreground">Fonte: {sel.source} · consultado em {new Date(sel.fetched_at).toLocaleString("pt-BR")}</div>
               </dl>
+              {(() => {
+                const sources = parseLeadResearchNotes(sel.notes);
+                if (!sources) return null;
+                return (
+                  <div className="space-y-2 rounded-lg border bg-card p-3 text-sm">
+                    <p className="font-semibold">Fontes da pesquisa Gemini</p>
+                    <div className="flex flex-wrap gap-3">
+                      {sources.googleMapsUrl && (
+                        <span className="inline-flex flex-wrap items-center gap-2">
+                          <a href={sources.googleMapsUrl} target="_blank" rel="noreferrer" translate="no" className="underline underline-offset-2">Google Maps</a>
+                          {sources.googleMapsName && <span className="text-xs text-muted-foreground">{sources.googleMapsName}</span>}
+                        </span>
+                      )}
+                      {sources.webSourceUrl && (
+                        <a href={sources.webSourceUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">{sources.webSourceName ?? "Fonte web"}</a>
+                      )}
+                      {sources.menuUrl && (
+                        <a href={sources.menuUrl} target="_blank" rel="noreferrer" className="underline underline-offset-2">Cardápio online</a>
+                      )}
+                    </div>
+                    {sources.evidence && <p className="text-xs text-muted-foreground">{sources.evidence}</p>}
+                  </div>
+                );
+              })()}
               <Button variant="secondary" className="w-full" disabled={busyId === sel.id} onClick={() => doAnalyze(sel)}>
                 {busyId === sel.id ? "IA analisando..." : sel.ai_message ? "Gerar nova mensagem" : "Analisar e escrever mensagem com IA"}
               </Button>

@@ -5,12 +5,13 @@ export const importInputSchema = z.object({
   city: z.enum(CITIES),
 }).strict();
 
-export const analyzeInputSchema = z.object({
-  id: z.string().uuid(),
+export const geminiSearchInputSchema = z.object({
+  city: z.enum(CITIES),
+  query: z.string().trim().min(3).max(120).default("negócios locais que podem não ter site ou cardápio digital"),
 }).strict();
 
-export const importStatusInputSchema = z.object({
-  taskToken: z.string().min(20).max(2048),
+export const analyzeInputSchema = z.object({
+  id: z.string().uuid(),
 }).strict();
 
 export const leadAnalysisSchema = z.object({
