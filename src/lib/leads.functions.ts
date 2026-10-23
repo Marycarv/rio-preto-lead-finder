@@ -42,7 +42,7 @@ export const analyzeLead = createServerFn({ method: "POST" })
   .handler(async ({ data, context }) => {
     const { data: lead, error } = await context.supabase.from("leads").select("*").eq("id", data.id).single();
     if (error || !lead) throw new Error("Lead não encontrado");
-    const key = process.env.LOVABLE_API_KEY;
+    const key = process.env["LOVABLE_API_KEY"];
     if (!key) throw new Error("IA não configurada");
 
     const facts = {

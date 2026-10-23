@@ -47,18 +47,18 @@ out center tags 600;`;
   return json.elements
     .filter((e) => e.tags?.name)
     .map((e) => {
-      const t = e.tags as Record<string, string>;
-      const website = t.website || t["contact:website"] || t.url || null;
-      const menu = t["website:menu"] || t.menu_url || null;
+      const t = e.tags as { [k: string]: string | undefined } & Record<"name", string>;
+      const website = t["website"] || t["contact:website"] || t["url"] || null;
+      const menu = t["website:menu"] || t["menu_url"] || null;
       const addr = [t["addr:street"], t["addr:housenumber"], t["addr:suburb"]].filter(Boolean).join(", ");
       return {
         source: "openstreetmap",
         source_id: `${e.type}/${e.id}`,
-        name: t.name,
-        category: t.amenity || t.shop || t.craft || t.office || null,
+        name: t["name"] as string,
+        category: t["amenity"] || t["shop"] || t["craft"] || t["office"] || null,
         city,
         address: addr || null,
-        phone: t.phone || t["contact:phone"] || null,
+        phone: t["phone"] || t["contact:phone"] || null,
         whatsapp: t["contact:whatsapp"] || null,
         website,
         has_website: !!website,

@@ -102,7 +102,7 @@ function Dashboard() {
 
   async function approve(l: Lead) {
     const { error } = await supabase.from("leads").update({ ai_message: draft, approved: true, status: "aprovado" }).eq("id", l.id);
-    if (error) return toast.error(error.message);
+    if (error) { toast.error(error.message); return; }
     setSel({ ...l, ai_message: draft, approved: true, status: "aprovado" });
     qc.invalidateQueries({ queryKey: ["leads"] });
     toast.success("Mensagem aprovada.");
