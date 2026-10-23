@@ -1,24 +1,35 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Button } from "@/components/ui/button";
 
-// No head() here: the home route inherits title/description/og/twitter from
-// __root.tsx, and ships no og:image so serve-time hosting can inject the
-// project's social preview (explicit og:image or latest screenshot).
 export const Route = createFileRoute("/")({
+  head: () => ({
+    meta: [
+      { title: "ADVEXON Prospect — Leads sem site em Rio Preto e região" },
+      { name: "description", content: "Encontre negócios sem site ou cardápio em São José do Rio Preto e região e aborde com mensagens personalizadas por IA." },
+      { property: "og:title", content: "ADVEXON Prospect — Leads sem site em Rio Preto" },
+      { property: "og:description", content: "Prospecção local com OpenStreetMap e IA, com aprovação manual antes de cada contato." },
+    ],
+  }),
   component: Index,
 });
 
-// IMPORTANT: Replace this placeholder. See ./README.md for routing conventions.
 function Index() {
   return (
-    <div
-      className="flex min-h-screen items-center justify-center"
-      style={{ backgroundColor: "#fcfbf8" }}
-    >
-      <img
-        data-lovable-blank-page-placeholder="REMOVE_THIS"
-        src="https://cdn.gpteng.co/blank-app-v1.svg"
-        alt="Your app will live here!"
-      />
+    <div className="mx-auto flex min-h-screen max-w-4xl flex-col justify-center px-6 py-16">
+      <div className="mb-8 flex items-center gap-3">
+        <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand font-display text-lg font-black text-primary-foreground">A</div>
+        <span className="font-display text-lg font-bold">ADVEXON Prospect</span>
+      </div>
+      <h1 className="text-4xl font-extrabold leading-tight md:text-6xl">
+        Negócios de Rio Preto <span className="text-primary">sem site</span>, prontos para sua abordagem.
+      </h1>
+      <p className="mt-6 max-w-2xl text-lg text-muted-foreground">
+        Busca em São José do Rio Preto, Mirassol, Bady Bassitt, Cedral, Guapiaçu e Ipiguá. A IA classifica cada lead e escreve a mensagem — você revisa, aprova e envia pelo WhatsApp.
+      </p>
+      <div className="mt-10 flex gap-3">
+        <Button asChild size="lg"><Link to="/dashboard">Abrir painel</Link></Button>
+        <Button asChild size="lg" variant="outline"><Link to="/auth">Entrar</Link></Button>
+      </div>
     </div>
   );
 }
