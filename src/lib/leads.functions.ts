@@ -1,12 +1,70 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
-import { CITIES, fetchOsmLeads } from "./sources/osm";
+import { CITIES } from "./sources/cities";
+import {
+  createOutscraperTaskToken,
+  getOutscraperSearchResults,
+  normalizeOutscraperResults,
+  startOutscraperSearch,
+  verifyOutscraperTaskToken,
+  type ProspectLead,
+} from "./sources/outscraper";
 import {
   analyzeInputSchema,
   importInputSchema,
+  importStatusInputSchema,
   readOpenAiJsonStream,
   validateLeadAnalysis,
 } from "./lead-validation";
+
+type ImportSummary = {
+  status: "complete";
+  found: number;
+  inserted: number;
+  withoutSite: number;
+  withoutMenu: number;
+};
+
+async function saveImportedLeads(
+  raw: ProspectLead[],
+  city: (typeof CITIES)[number],
+  userId: string,
+  supabase: Parameters<Parameters<typeof requireSupabaseAuth>[0]>[0] extends never ? never : any,
+): Promise<ImportSummary> {
+  const now = new Date().toISOString();
+  const rows = raw.map((lead) => ({ ...lead, user_id: userId, fetched_at: now }));
+  let inserted = 0;
+
+  for (let index = 0; index < rows.length; index += 200) {
+    const chunk = rows.slice(index, index + 200);
+    const { data: result, error } = await supabase
+      .from("leads")
+      .upsert(chunk, { onConflict: "user_id,source,source_id", ignoreDuplicates: true })
+      .select("id");
+
+    if (error) {
+      console.error("[leads.import] Database write failed", { code: error.code ?? "unknown" });
+      throw new Error("Não foi possível salvar os leads desta busca. Tente novamente; a importação pode ser repetida com segurança.");
+    }
+    inserted += result?.length ?? 0;
+  }
+
+  return {
+    status: "complete",
+    found: raw.length,
+    inserted,
+    withoutSite: raw.filter((lead) => !lead.has_website).length,
+    withoutMenu: raw.filter((lead) => !lead.has_menu).length,
+  };
+}
+
+function getOutscraperKey(): string {
+  const key = process.env["OUTSCRAPER_API_KEY"];
+  if (!key) {
+    throw new Error("A fonte Google Maps precisa da variável secreta OUTSCRAPER_API_KEY. Crie uma chave na Outscraper e adicione-a aos Secrets do Lovable Cloud.");
+  }
+  return key;
+}
 
 export const importLeads = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
@@ -16,30 +74,38 @@ export const importLeads = createServerFn({ method: "POST" })
     return parsed.data;
   })
   .handler(async ({ data, context }) => {
-    const raw = await fetchOsmLeads(data.city);
-    const now = new Date().toISOString();
-    const rows = raw.map((lead) => ({ ...lead, user_id: context.userId, fetched_at: now }));
-    let inserted = 0;
-
-    for (let index = 0; index < rows.length; index += 200) {
-      const chunk = rows.slice(index, index + 200);
-      const { data: result, error } = await context.supabase
-        .from("leads")
-        .upsert(chunk, { onConflict: "user_id,source,source_id", ignoreDuplicates: true })
-        .select("id");
-
-      if (error) {
-        console.error("[leads.import] Database write failed", { code: error.code ?? "unknown" });
-        throw new Error("Não foi possível salvar os leads desta busca. Tente novamente; a importação pode ser repetida com segurança.");
-      }
-      inserted += result?.length ?? 0;
+    const apiKey = getOutscraperKey();
+    const started = await startOutscraperSearch(apiKey, data.city);
+    if (started.status === "complete") {
+      const raw = normalizeOutscraperResults(started.data, data.city);
+      return saveImportedLeads(raw, data.city, context.userId, context.supabase);
     }
 
     return {
-      found: raw.length,
-      inserted,
-      withoutSite: raw.filter((lead) => !lead.has_website).length,
+      status: "processing" as const,
+      taskToken: createOutscraperTaskToken(started.requestId, context.userId, data.city, apiKey),
     };
+  });
+
+export const getLeadImportStatus = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: unknown) => {
+    const parsed = importStatusInputSchema.safeParse(input);
+    if (!parsed.success) throw new Error("Identificador da busca inválido.");
+    return parsed.data;
+  })
+  .handler(async ({ data, context }) => {
+    const apiKey = getOutscraperKey();
+    const claim = verifyOutscraperTaskToken(data.taskToken, context.userId, apiKey);
+    if (!claim) {
+      throw new Error("Esta busca expirou ou não pertence à sua sessão. Inicie uma nova busca.");
+    }
+
+    const task = await getOutscraperSearchResults(apiKey, claim.requestId);
+    if (task.status === "processing") return { status: "processing" as const };
+
+    const raw = normalizeOutscraperResults(task.data, claim.city);
+    return saveImportedLeads(raw, claim.city, context.userId, context.supabase);
   });
 
 const AI_RESPONSE_SCHEMA = {
