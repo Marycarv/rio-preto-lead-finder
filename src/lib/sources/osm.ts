@@ -1,3 +1,5 @@
+import { CITIES } from "./cities";
+
 // OpenStreetMap (Overpass) lead source. Server-only usage.
 export type RawLead = {
   source: string;
@@ -15,7 +17,6 @@ export type RawLead = {
   lon: number | null;
 };
 
-import { CITIES } from "./cities";
 export { CITIES } from "./cities";
 export type City = (typeof CITIES)[number];
 
