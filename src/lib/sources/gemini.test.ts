@@ -159,7 +159,18 @@ describe("Gemini Google Search research", () => {
     expect(body["response_format"]).toMatchObject({ type: "text", mime_type: "application/json" });
   });
 
-  it("surfaces a clear message for Gemini API rate limits", async () => {
+  it("explains when the Google Search daily quota is exhausted", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        code: 429,
+        status: "RESOURCE_EXHAUSTED",
+        message: "Quota exceeded for requests per day.",
+      },
+    }), { status: 429, headers: { "content-type": "application/json" } })));
+    await expect(searchGeminiProspects("server-key", "Mirassol", "cafes")).rejects.toThrow("cota diária de pesquisa");
+  });
+
+  it("returns an actionable quota message when a 429 response body is not JSON", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response("rate limit", { status: 429 })));
     await expect(searchGeminiProspects("server-key", "Mirassol", "cafes")).rejects.toThrow("cota ou limite de uso");
   });
