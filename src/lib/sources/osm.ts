@@ -60,6 +60,8 @@ const OVERPASS_ENDPOINTS = [
 const CITY_AREA_CACHE = new Map<string, { areaId: number; expiresAt: number }>();
 let lastNominatimRequestAt = 0;
 let lastOverpassRequestAt = 0;
+let nominatimQueue: Promise<void> = Promise.resolve();
+let overpassQueue: Promise<void> = Promise.resolve();
 let nextOverpassEndpoint = 0;
 
 const QUERY_GROUPS = [
@@ -98,14 +100,40 @@ async function delay(ms: number): Promise<void> {
   if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Serialize calls per runtime so concurrent authenticated requests do not burst
+// public services beyond their conservative per-process spacing.
+async function waitForNominatimSlot(): Promise<void> {
+  const previous = nominatimQueue;
+  let release!: () => void;
+  nominatimQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    await delay(1100 - (Date.now() - lastNominatimRequestAt));
+    lastNominatimRequestAt = Date.now();
+  } finally {
+    release();
+  }
+}
+
+async function waitForOverpassSlot(): Promise<void> {
+  const previous = overpassQueue;
+  let release!: () => void;
+  overpassQueue = new Promise<void>((resolve) => { release = resolve; });
+  await previous;
+  try {
+    await delay(1000 - (Date.now() - lastOverpassRequestAt));
+    lastOverpassRequestAt = Date.now();
+  } finally {
+    release();
+  }
+}
+
 async function resolveCityArea(city: City): Promise<number> {
   const cacheKey = normalizePlaceName(city);
   const cached = CITY_AREA_CACHE.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) return cached.areaId;
 
-  const waitMs = 1100 - (Date.now() - lastNominatimRequestAt);
-  await delay(waitMs);
-  lastNominatimRequestAt = Date.now();
+  await waitForNominatimSlot();
 
   const params = new URLSearchParams({
     q: city + ", São Paulo, Brasil",
@@ -203,9 +231,7 @@ async function fetchOverpass(query: string): Promise<OverpassPayload> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     const endpointIndex = (nextOverpassEndpoint + attempt) % OVERPASS_ENDPOINTS.length;
     const endpoint = OVERPASS_ENDPOINTS[endpointIndex];
-    const waitMs = 1000 - (Date.now() - lastOverpassRequestAt);
-    await delay(waitMs);
-    lastOverpassRequestAt = Date.now();
+    await waitForOverpassSlot();
 
     try {
       const response = await fetch(endpoint, {
