@@ -221,6 +221,9 @@ export async function startOutscraperSearch(apiKey: string, city: City): Promise
     throw new Error("Não foi possível iniciar a busca no Google Maps via Outscraper. Verifique a conexão e tente novamente.");
   }
 
+  if (response.status === 204) {
+    throw new Error("O Outscraper terminou a solicitação sem resultados. Tente novamente com uma busca diferente.");
+  }
   const payload = await readJsonResponse(response);
   if (!response.ok) throw providerHttpError(response.status);
   return parseTaskStart(payload);
@@ -243,8 +246,11 @@ export async function getOutscraperSearchResults(apiKey: string, requestId: stri
   }
 
   if (response.status === 202) return { status: "processing" };
+  if (response.status === 204) {
+    throw new Error("A busca do Google Maps falhou no Outscraper e não retornou resultados. Confira os créditos e tente novamente.");
+  }
   const payload = await readJsonResponse(response);
-  if (response.status === 204 || (isRecord(payload) && payload["status"] === "Failure")) {
+  if (isRecord(payload) && payload["status"] === "Failure") {
     throw new Error("A busca do Google Maps falhou no Outscraper. Confira os créditos e tente novamente.");
   }
   if (!response.ok) throw providerHttpError(response.status);
@@ -339,7 +345,7 @@ function parseTaskStart(payload: unknown): OutscraperTaskStart {
   }
 
   const requestId = typeof payload["id"] === "string" ? payload["id"] : null;
-  if ((responseIsPending(status) || responseIsPending(status) === false) && requestId && REQUEST_ID_PATTERN.test(requestId)) {
+  if (responseIsPending(status) && requestId && REQUEST_ID_PATTERN.test(requestId)) {
     return { status: "processing", requestId };
   }
 
