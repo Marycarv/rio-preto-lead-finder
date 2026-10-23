@@ -4,8 +4,8 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { importLeads, analyzeLead } from "@/lib/leads.functions";
-import { CITIES } from "@/lib/sources/osm";
+import { importLeads, getLeadImportStatus, analyzeLead } from "@/lib/leads.functions";
+import { CITIES } from "@/lib/sources/cities";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -35,10 +35,13 @@ function Dashboard() {
   const qc = useQueryClient();
   const nav = useNavigate();
   const runImport = useServerFn(importLeads);
+  const runImportStatus = useServerFn(getLeadImportStatus);
   const runAnalyze = useServerFn(analyzeLead);
   const [city, setCity] = useState<string>(CITIES[0]);
   const [importing, setImporting] = useState(false);
-  const [onlyNoSite, setOnlyNoSite] = useState(true);
+  const [pendingImportToken, setPendingImportToken] = useState<string | null>(null);
+  const [importStage, setImportStage] = useState("");
+  const [onlyNoSite, setOnlyNoSite] = useState(false);
   const [onlyPhone, setOnlyPhone] = useState(false);
   const [filterCity, setFilterCity] = useState("");
   const [q, setQ] = useState("");
@@ -110,12 +113,47 @@ function Dashboard() {
   async function doImport() {
     setImporting(true);
     try {
-      const r = await runImport({ data: { city } });
-      toast.success(`${r.found} encontrados em ${city} (${r.withoutSite} sem site). ${r.inserted} novos salvos.`);
-      await qc.invalidateQueries({ queryKey: ["leads"] });
-      await qc.invalidateQueries({ queryKey: ["lead-stats"] });
-    } catch (e) { toast.error((e as Error).message); }
-    finally { setImporting(false); }
+      let taskToken = pendingImportToken;
+
+      if (!taskToken) {
+        setImportStage("Iniciando busca no Google Maps...");
+        const started = await runImport({ data: { city } });
+        if (started.status === "complete") {
+          toast.success(`${started.found} oportunidades encontradas em ${city}: ${started.withoutSite} sem site e ${started.withoutMenu} sem cardápio. ${started.inserted} novas salvas.`);
+          await qc.invalidateQueries({ queryKey: ["leads"] });
+          await qc.invalidateQueries({ queryKey: ["lead-stats"] });
+          return;
+        }
+        taskToken = started.taskToken;
+        setPendingImportToken(taskToken);
+      }
+
+      // Outscraper searches run asynchronously, so poll the provider instead of
+      // holding one long-running server request open. Reuse the signed task token
+      // when the user resumes a pending search; never start a duplicate paid job.
+      const maxChecks = 75;
+      for (let attempt = 0; attempt < maxChecks; attempt += 1) {
+        setImportStage(attempt === 0
+          ? "Pesquisando empresas no Google Maps..."
+          : `Google Maps pesquisando... verificação ${attempt + 1}/${maxChecks}`);
+        await new Promise((resolve) => setTimeout(resolve, 4000));
+        const progress = await runImportStatus({ data: { taskToken } });
+        if (progress.status === "processing") continue;
+
+        setPendingImportToken(null);
+        toast.success(`${progress.found} oportunidades encontradas em ${city}: ${progress.withoutSite} sem site e ${progress.withoutMenu} sem cardápio. ${progress.inserted} novas salvas.`);
+        await qc.invalidateQueries({ queryKey: ["leads"] });
+        await qc.invalidateQueries({ queryKey: ["lead-stats"] });
+        return;
+      }
+
+      toast.info("A busca ainda está processando no Google Maps. Clique em “Continuar busca pendente” para consultar o mesmo trabalho sem iniciar uma nova cobrança.");
+    } catch (e) {
+      toast.error((e as Error).message);
+    } finally {
+      setImporting(false);
+      setImportStage("");
+    }
   }
 
   async function doAnalyze(l: Lead) {
@@ -181,7 +219,7 @@ function Dashboard() {
           <div className="grid h-11 w-11 place-items-center rounded-xl bg-brand font-display text-lg font-black text-primary-foreground">A</div>
           <div>
             <h1 className="text-xl font-bold">ADVEXON Prospect</h1>
-            <p className="text-sm text-muted-foreground">Rio Preto e região · fonte: OpenStreetMap</p>
+            <p className="text-sm text-muted-foreground">Rio Preto e região · fonte: Google Maps via Outscraper</p>
           </div>
         </div>
         <Button variant="outline" onClick={signOut}>Sair</Button>
@@ -199,12 +237,14 @@ function Dashboard() {
       <section className="mb-5 flex flex-wrap items-end gap-3 rounded-2xl border bg-card p-4">
         <div>
           <div className="mb-1 text-xs text-muted-foreground">Buscar novos estabelecimentos em</div>
-          <select value={city} onChange={(e) => setCity(e.target.value)} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
+          <select value={city} disabled={importing || Boolean(pendingImportToken)} onChange={(e) => setCity(e.target.value)} className="h-9 rounded-md border bg-input/30 px-3 text-sm">
             {CITIES.map((c) => <option key={c}>{c}</option>)}
           </select>
         </div>
-        <Button onClick={doImport} disabled={importing}>{importing ? "Buscando no OpenStreetMap..." : "Buscar leads"}</Button>
-        <p className="text-xs text-muted-foreground">"Sem site" significa que nenhum site foi identificado na fonte — confirme antes de abordar.</p>
+        <Button onClick={doImport} disabled={importing}>{importing ? (importStage || "Buscando no Google Maps...") : pendingImportToken ? "Continuar busca pendente" : "Buscar leads no Google Maps"}</Button>
+        <p className="max-w-2xl text-xs text-muted-foreground">
+          Google Maps via Outscraper · até 300 lugares por busca, em várias categorias. A conta divulga 500 lugares iniciais grátis; depois, US$ 3 por 1.000 registros até 100 mil, conforme uso. Sem site e sem cardápio são oportunidades potenciais — confirme os dados antes de abordar.
+        </p>
       </section>
 
       <div className="grid gap-5 lg:grid-cols-[1fr_420px]">
