@@ -202,7 +202,7 @@ export function normalizeOutscraperResults(value: unknown, requestedCity: City):
       lat: parseNumber(row["latitude"], -90, 90),
       lon: parseNumber(row["longitude"], -180, 180),
     };
-    unique.set(sourceId, lead);
+    if (!unique.has(sourceId)) unique.set(sourceId, lead);
   }
 
   return [...unique.values()];
@@ -286,9 +286,8 @@ export async function getOutscraperSearchResults(apiKey: string, requestId: stri
 function encodeBase64Url(bytes: Uint8Array): string {
   let binary = "";
   for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary).replace(/\\+/g, "-").replace(/\\//g, "_").replace(/=+$/g, "");
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
-
 function decodeBase64Url(value: string): Uint8Array {
   const base64 = value.replace(/-/g, "+").replace(/_/g, "/");
   const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
