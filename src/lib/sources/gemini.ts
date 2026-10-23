@@ -140,6 +140,12 @@ async function runGeminiInteraction(
   let payload: unknown;
   try { payload = await response.json(); }
   catch {
+    if (response.status === 429) {
+      throw new Error("A API Gemini recusou a pesquisa por cota ou limite de uso. Confira as cotas e o nível de uso do projeto no Google AI Studio.");
+    }
+    if (response.status === 402) {
+      throw new Error("A API do Gemini não aceitou a solicitação por cobrança. Confira o faturamento do Google AI.");
+    }
     if (!response.ok) throw new Error("O Gemini respondeu com erro HTTP " + String(response.status) + ". Confira a configuração da API e tente novamente.");
     throw new Error("O Gemini retornou uma resposta inválida.");
   }
