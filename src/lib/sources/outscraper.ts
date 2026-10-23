@@ -88,6 +88,14 @@ function cleanText(value: unknown, maxLength = 500): string | null {
   return result.length > 0 ? result : null;
 }
 
+function firstText(values: unknown[], maxLength = 500): string | null {
+  for (const value of values) {
+    const result = cleanText(value, maxLength);
+    if (result) return result;
+  }
+  return null;
+}
+
 function normalizePlaceName(value: string): string {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("pt-BR").replace(/\s+/g, " ").trim();
 }
@@ -148,6 +156,9 @@ export function normalizeOutscraperResults(value: unknown, requestedCity: City):
     const name = cleanText(row["name"], 180);
     if (!name) continue;
 
+    const countryCode = cleanText(row["country_code"], 8);
+    if (countryCode && countryCode.toUpperCase() !== "BR") continue;
+
     const sourceCity = cleanText(row["city"], 140);
     const resolvedCity = matchSupportedCity(sourceCity);
     // If a result explicitly belongs to a different municipality, ignore it
@@ -155,8 +166,8 @@ export function normalizeOutscraperResults(value: unknown, requestedCity: City):
     if (sourceCity && !resolvedCity) continue;
     if (resolvedCity && resolvedCity !== requestedCity) continue;
 
-    const website = cleanText(row["site"] ?? row["website"], 600);
-    const menu = cleanText(row["menu_link"] ?? row["menu_url"], 600);
+    const website = firstText([row["site"], row["website"]], 600);
+    const menu = firstText([row["menu_link"], row["menu_url"]], 600);
     const hasWebsite = website !== null;
     const hasMenu = menu !== null;
 
@@ -164,14 +175,11 @@ export function normalizeOutscraperResults(value: unknown, requestedCity: City):
     // missing at least one of the two digital assets the product sells.
     if (hasWebsite && hasMenu) continue;
 
-    const address = cleanText(row["full_address"] ?? row["address"] ?? row["street"], 500);
+    const address = firstText([row["full_address"], row["address"], row["street"]], 500);
     const city = resolvedCity ?? requestedCity;
-    const providerId = cleanText(row["google_id"] ?? row["place_id"] ?? row["cid"], 180);
+    const providerId = firstText([row["google_id"], row["place_id"], row["cid"]], 180);
     const sourceId = providerId ? "google:" + providerId : "google:fallback:" + stableFallbackId(name, city, address);
-    const category =
-      cleanText(row["category"], 140) ??
-      cleanText(row["type"], 140) ??
-      cleanText(row["subtypes"], 180);
+    const category = firstText([row["category"], row["type"], row["subtypes"]], 180);
 
     const lead: ProspectLead = {
       source: "outscraper_google_maps",
