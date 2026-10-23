@@ -108,10 +108,10 @@ describe("OpenStreetMap service failures", () => {
     const cityBoundary = [{
       osm_type: "relation",
       osm_id: 123457,
-      name: "Cedral",
+      name: "Ipiguá",
       category: "boundary",
       type: "administrative",
-      address: { city: "Cedral", state: "São Paulo", country: "Brasil" },
+      address: { city: "Ipiguá", state: "São Paulo", country: "Brasil" },
       extratags: { admin_level: "8" },
       boundingbox: ["-20.95", "-20.75", "-49.35", "-49.10"],
     }];
@@ -137,7 +137,7 @@ describe("OpenStreetMap service failures", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(fetchOsmLeads("Cedral")).resolves.toEqual([]);
+    await expect(fetchOsmLeads("Ipiguá")).resolves.toEqual([]);
     // The first whole-city query timed out; the remaining queries should use
     // smaller bounds derived from the validated municipal response.
     expect(requestedQueries.length).toBe(8);
