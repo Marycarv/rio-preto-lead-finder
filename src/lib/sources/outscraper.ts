@@ -295,6 +295,12 @@ function decodeBase64Url(value: string): Uint8Array {
   return Uint8Array.from(binary, (character) => character.charCodeAt(0));
 }
 
+function asArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+}
+
 async function importHmacKey(secret: string): Promise<CryptoKey> {
   return globalThis.crypto.subtle.importKey(
     "raw",
@@ -339,8 +345,8 @@ export async function verifyOutscraperTaskToken(
     const isValid = await globalThis.crypto.subtle.verify(
       "HMAC",
       key,
-      decodeBase64Url(suppliedSignature),
-      new TextEncoder().encode(payload),
+      asArrayBuffer(decodeBase64Url(suppliedSignature)),
+      asArrayBuffer(new TextEncoder().encode(payload)),
     );
     if (!isValid) return null;
 
