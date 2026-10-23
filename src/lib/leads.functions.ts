@@ -92,11 +92,11 @@ export const analyzeLead = createServerFn({ method: "POST" })
 
     // Only the business details needed to personalize the analysis are sent.
     const facts = {
-      nome: lead.name,
-      categoria: lead.category,
-      cidade: lead.city,
-      site_identificado: lead.has_website ? lead.website : "nenhum site identificado na fonte",
-      cardapio_online: lead.has_menu ? "identificado na fonte" : "não identificado na fonte",
+      name: lead.name,
+      category: lead.category,
+      city: lead.city,
+      website: lead.has_website ? lead.website : null,
+      hasMenu: lead.has_menu,
     };
 
     const untrustedResult = await generateLeadAnalysisWithGemini(key, facts);
