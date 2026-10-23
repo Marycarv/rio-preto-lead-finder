@@ -17,7 +17,7 @@ export type RawLead = {
   lon: number | null;
 };
 
-export { CITIES } from "./cities";
+export { CITIES };
 export type City = (typeof CITIES)[number];
 
 type RecordValue = Record<string, unknown>;
